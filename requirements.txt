@@ -1,0 +1,33 @@
+# Requirements principales
+# Installer avec: pip install -r requirements.txt
+
+# Kafka
+kafka-python==2.0.2
+
+# Spark
+pyspark==3.5.0
+apache-airflow-providers-apache-spark
+apache-airflow-providers-apache-kafka
+
+# MongoDB
+pymongo==4.6.1
+
+# ML
+scikit-learn==1.4.0
+pandas==2.1.4
+numpy==1.26.3
+mlflow==2.9.2
+xgboost==2.0.3
+
+# API
+fastapi==0.109.0
+uvicorn==0.27.0
+pydantic==2.5.3
+
+# Testing
+pytest==7.4.4
+pytest-cov==4.1.0
+
+# Utils
+python-dotenv==1.0.0
+requests==2.31.0

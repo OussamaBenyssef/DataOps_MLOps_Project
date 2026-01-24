@@ -1,0 +1,339 @@
+services:
+  # ============================================
+  # KAFKA & ZOOKEEPER
+  # ============================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - datamlops-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # POSTGRESQL
+  # ============================================
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow123
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # MONGODB (Data Storage)
+  # ============================================
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: datamlops
+      MONGO_INITDB_ROOT_PASSWORD: datamlops123
+      MONGO_INITDB_DATABASE: airquality
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ../mongodb/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # APACHE SPARK
+  # ============================================
+  spark-master:
+    image: apache/spark:3.5.0
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    networks:
+      - datamlops-network
+
+  spark-worker:
+    image: apache/spark:3.5.0
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # APACHE AIRFLOW
+  # ============================================
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    container_name: airflow-webserver
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow123@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here
+      - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - airflow_logs:/opt/airflow/logs
+    ports:
+      - "8081:8080"
+    command: webserver
+    networks:
+      - datamlops-network
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    container_name: airflow-scheduler
+    depends_on:
+      - airflow-webserver
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow123@postgres:5432/airflow
+      - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - airflow_logs:/opt/airflow/logs
+    command: scheduler
+    networks:
+      - datamlops-network
+
+  airflow-init:
+    image: apache/airflow:2.8.0
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow123@postgres:5432/airflow
+    command: >
+      bash -c "airflow db init && 
+               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # MLFLOW
+  # ============================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    container_name: mlflow
+    ports:
+      - "5001:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow/mlflow.db
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
+    volumes:
+      - mlflow_artifacts:/mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root /mlflow/artifacts
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # FASTAPI
+  # ============================================
+  fastapi:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: fastapi
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/airquality?authSource=admin
+    volumes:
+      - ../src/ml/api:/app
+    depends_on:
+      - mlflow
+      - mongodb
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # METABASE
+  # ============================================
+  metabase:
+    image: metabase/metabase:v0.48.0
+    container_name: metabase
+    ports:
+      - "3000:3000"
+    environment:
+      - MB_DB_TYPE=h2
+    volumes:
+      - metabase_data:/metabase-data
+    depends_on:
+      - mongodb
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # DATAHUB - Data Catalog
+  # ============================================
+  datahub-mysql:
+    image: mysql:8.0
+    container_name: datahub-mysql
+    hostname: datahub-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=datahub123
+      - MYSQL_DATABASE=datahub
+      - MYSQL_USER=datahub
+      - MYSQL_PASSWORD=datahub123
+    volumes:
+      - datahub_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datamlops-network
+
+  datahub-elasticsearch:
+    image: elasticsearch:7.17.9
+    container_name: datahub-elasticsearch
+    hostname: datahub-elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - datahub_es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - datamlops-network
+
+  datahub-prerequisites:
+    image: acryldata/datahub-upgrade:head
+    container_name: datahub-prerequisites
+    hostname: datahub-prerequisites
+    command: [ "-u", "SystemUpdate" ]
+    environment:
+      - EBEAN_DATASOURCE_USERNAME=datahub
+      - EBEAN_DATASOURCE_PASSWORD=datahub123
+      - EBEAN_DATASOURCE_HOST=datahub-mysql:3306
+      - EBEAN_DATASOURCE_URL=jdbc:mysql://datahub-mysql:3306/datahub?verifyServerCertificate=false&useSSL=true&useUnicode=yes&characterEncoding=UTF-8
+      - EBEAN_DATASOURCE_DRIVER=com.mysql.cj.jdbc.Driver
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9092
+      - KAFKA_SCHEMAREGISTRY_URL=http://datahub-gms:8080/schema-registry/api/
+      - ELASTICSEARCH_HOST=datahub-elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - GRAPH_SERVICE_IMPL=elasticsearch
+      - DATAHUB_GMS_HOST=datahub-gms
+      - DATAHUB_GMS_PORT=8080
+      - ENTITY_REGISTRY_CONFIG_PATH=/datahub/datahub-gms/resources/entity-registry.yml
+    depends_on:
+      datahub-mysql:
+        condition: service_healthy
+      datahub-elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - datamlops-network
+
+  datahub-gms:
+    image: acryldata/datahub-gms:head
+    container_name: datahub-gms
+    hostname: datahub-gms
+    ports:
+      - "8082:8080"
+    environment:
+      - EBEAN_DATASOURCE_USERNAME=datahub
+      - EBEAN_DATASOURCE_PASSWORD=datahub123
+      - EBEAN_DATASOURCE_HOST=datahub-mysql:3306
+      - EBEAN_DATASOURCE_URL=jdbc:mysql://datahub-mysql:3306/datahub?verifyServerCertificate=false&useSSL=true&useUnicode=yes&characterEncoding=UTF-8
+      - EBEAN_DATASOURCE_DRIVER=com.mysql.cj.jdbc.Driver
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9092
+      - KAFKA_SCHEMAREGISTRY_URL=http://datahub-gms:8080/schema-registry/api/
+      - ELASTICSEARCH_HOST=datahub-elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - GRAPH_SERVICE_IMPL=elasticsearch
+      - MAE_CONSUMER_ENABLED=true
+      - MCE_CONSUMER_ENABLED=true
+      - ENTITY_SERVICE_ENABLE_RETENTION=true
+    depends_on:
+      datahub-mysql:
+        condition: service_healthy
+      datahub-elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - datamlops-network
+
+  datahub-frontend:
+    image: acryldata/datahub-frontend-react:head
+    container_name: datahub-frontend
+    hostname: datahub-frontend
+    ports:
+      - "9002:9002"
+    environment:
+      - DATAHUB_GMS_HOST=datahub-gms
+      - DATAHUB_GMS_PORT=8080
+      - DATAHUB_SECRET=YouKnowNothing
+      - DATAHUB_APP_VERSION=1.0
+      - DATAHUB_PLAY_MEM_BUFFER_SIZE=10MB
+    depends_on:
+      - datahub-gms
+    networks:
+      - datamlops-network
+
+networks:
+  datamlops-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  airflow_logs:
+  mlflow_artifacts:
+  metabase_data:
+  datahub_mysql_data:
+  datahub_es_data:
