@@ -73,3 +73,7 @@ mlartifacts/
 airflow.db
 airflow.cfg
 webserver_config.py
+
+# ClickUp scripts (contiennent des API keys)
+scripts/*clickup*
+scripts/migrate_clickup*

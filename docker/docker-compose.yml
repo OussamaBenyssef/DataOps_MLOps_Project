@@ -58,7 +58,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: datamlops
       MONGO_INITDB_ROOT_PASSWORD: datamlops123
-      MONGO_INITDB_DATABASE: airquality
+      MONGO_INITDB_DATABASE: cryptomarket
     ports:
       - "27017:27017"
     volumes:
@@ -179,7 +179,7 @@ services:
       - "8000:8000"
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/airquality?authSource=admin
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
     volumes:
       - ../src/ml/api:/app
     depends_on:
