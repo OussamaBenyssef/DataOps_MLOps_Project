@@ -29,7 +29,7 @@ scipy==1.12.0
 joblib==1.3.2
 
 # Drift Detection
-evidently==0.4.13
+evidently==0.4.33
 
 # API
 fastapi==0.109.0
