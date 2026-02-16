@@ -33,6 +33,25 @@ services:
       - datamlops-network
 
   # ============================================
+  # BINANCE STREAMING (P2)
+  # ============================================
+  binance-streaming:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.streaming
+    container_name: binance-streaming
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      BINANCE_TRADING_PAIRS: btcusdt,ethusdt,bnbusdt
+      BINANCE_STREAM_TYPES: trade,kline_1m
+      PYTHONUNBUFFERED: 1
+    restart: unless-stopped
+    networks:
+      - datamlops-network
+
+  # ============================================
   # POSTGRESQL
   # ============================================
   postgres:
