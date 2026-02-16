@@ -29,6 +29,32 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # KAFKA TOPICS INIT (auto-création des topics)
+  # ============================================
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo '⏳ Création des topics Kafka...' &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic raw_trades --partitions 3 --replication-factor 1 --config retention.ms=86400000 --config cleanup.policy=delete &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic raw_klines --partitions 3 --replication-factor 1 --config retention.ms=604800000 --config cleanup.policy=delete &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic processed_data --partitions 3 --replication-factor 1 --config retention.ms=604800000 --config cleanup.policy=delete &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic anomalies --partitions 1 --replication-factor 1 --config retention.ms=2592000000 --config cleanup.policy=delete &&
+        echo '✅ Topics Kafka créés avec succès'
+      "
     networks:
       - datamlops-network
 
@@ -41,7 +67,8 @@ services:
       dockerfile: docker/Dockerfile.streaming
     container_name: binance-streaming
     depends_on:
-      - kafka
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       BINANCE_TRADING_PAIRS: btcusdt,ethusdt,bnbusdt
