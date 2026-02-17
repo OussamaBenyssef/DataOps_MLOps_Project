@@ -48,6 +48,28 @@ htmlcov/
 
 # Logs
 *.log
+
+# Environment variables
+.env
+*.env
+!.env.example
+
+# Kafka data
+kafka-logs/
+zookeeper-data/
+
+# MongoDB data
+mongodb_data/
+postgres_data/
+
+# MLflow artifacts
+mlruns/
+mlartifacts/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
 logs/
 
 # Data
