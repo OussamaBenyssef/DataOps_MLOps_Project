@@ -10,16 +10,16 @@ from datetime import datetime, timedelta
 import sys
 import os
 
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'processing'))
+# Add src to path for package imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from transformations import (
+from processing.transformations import (
     validate_trades_data,
     validate_ohlcv_data,
     calculate_price_change,
     detect_price_spikes
 )
-from technical_indicators import (
+from processing.technical_indicators import (
     calculate_sma,
     calculate_rsi,
     calculate_bollinger_bands
@@ -44,7 +44,7 @@ def sample_trades_data(spark):
     """Create sample trades data for testing"""
     schema = StructType([
         StructField("symbol", StringType(), False),
-        StructField("price", DoubleType(), False),
+        StructField("price", DoubleType(), True),  # nullable pour tester les None
         StructField("quantity", DoubleType(), False),
         StructField("timestamp", TimestampType(), False)
     ])
@@ -80,11 +80,11 @@ def sample_ohlcv_data(spark):
     
     for i in range(50):
         timestamp = base_time + timedelta(minutes=i)
-        open_price = 45000 + (i * 10)
-        close_price = open_price + 50
-        high_price = close_price + 20
-        low_price = open_price - 10
-        volume = 100.0 + (i * 2)
+        open_price = float(45000 + (i * 10))
+        close_price = float(open_price + 50)
+        high_price = float(close_price + 20)
+        low_price = float(open_price - 10)
+        volume = float(100.0 + (i * 2))
         
         data.append((
             "BTCUSDT",

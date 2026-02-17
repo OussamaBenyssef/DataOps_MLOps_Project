@@ -143,41 +143,41 @@ def calculate_rsi(
         .rowsBetween(-(period - 1), 0)
     )
     
-    # Calculate price changes
+    # Calculate price changes (prefixed to avoid collision with pipeline's price_change)
     df_with_change = df.withColumn(
-        "price_change",
+        "_rsi_price_change",
         col(price_col) - lag(col(price_col), 1).over(window_spec)
     )
     
     # Separate gains and losses
     df_with_gains_losses = (df_with_change
         .withColumn(
-            "gain",
-            when(col("price_change") > 0, col("price_change")).otherwise(lit(0))
+            "_rsi_gain",
+            when(col("_rsi_price_change") > 0, col("_rsi_price_change")).otherwise(lit(0))
         )
         .withColumn(
-            "loss",
-            when(col("price_change") < 0, -col("price_change")).otherwise(lit(0))
+            "_rsi_loss",
+            when(col("_rsi_price_change") < 0, -col("_rsi_price_change")).otherwise(lit(0))
         )
     )
     
     # Calculate average gain and loss
     df_with_avg = (df_with_gains_losses
-        .withColumn("avg_gain", avg(col("gain")).over(window_avg))
-        .withColumn("avg_loss", avg(col("loss")).over(window_avg))
+        .withColumn("_rsi_avg_gain", avg(col("_rsi_gain")).over(window_avg))
+        .withColumn("_rsi_avg_loss", avg(col("_rsi_loss")).over(window_avg))
     )
     
     # Calculate RSI
     result_df = (df_with_avg
         .withColumn(
-            "rs",
-            when(col("avg_loss") != 0, col("avg_gain") / col("avg_loss")).otherwise(lit(100))
+            "_rsi_rs",
+            when(col("_rsi_avg_loss") != 0, col("_rsi_avg_gain") / col("_rsi_avg_loss")).otherwise(lit(100))
         )
         .withColumn(
             f"rsi_{period}",
-            spark_round(100 - (100 / (1 + col("rs"))), 2)
+            spark_round(100 - (100 / (1 + col("_rsi_rs"))), 2)
         )
-        .drop("price_change", "gain", "loss", "avg_gain", "avg_loss", "rs")
+        .drop("_rsi_price_change", "_rsi_gain", "_rsi_loss", "_rsi_avg_gain", "_rsi_avg_loss", "_rsi_rs")
     )
     
     logger.info(f"✅ RSI_{period} calculated")
