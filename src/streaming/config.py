@@ -91,6 +91,33 @@ class KafkaConfig:
             }
 
 
+@dataclass
+class BinanceRESTConfig:
+    """Configuration pour le client REST Binance (données historiques OHLCV)"""
+
+    # URL de base de l'API REST Binance
+    BASE_URL: str = "https://api.binance.com"
+
+    # Endpoint klines
+    KLINES_ENDPOINT: str = "/api/v3/klines"
+
+    # Nombre maximum de klines par requête (limite Binance)
+    MAX_KLINES_PER_REQUEST: int = 1000
+
+    # Délai entre les requêtes pour respecter le rate-limit (secondes)
+    REQUEST_DELAY_S: float = 0.2
+
+    # Timeout HTTP (secondes)
+    REQUEST_TIMEOUT_S: int = 10
+
+    # Intervalle par défaut pour les klines historiques
+    DEFAULT_INTERVAL: str = "1m"
+
+    # Source identifier pour distinguer REST API vs WebSocket
+    SOURCE_LABEL: str = "rest_api"
+
+
 # Instances globales
 binance_config = BinanceConfig()
 kafka_config = KafkaConfig()
+rest_config = BinanceRESTConfig()
