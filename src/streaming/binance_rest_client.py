@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from .config import binance_config, kafka_config
+from .config import binance_config, rest_config
 from .kafka_producer import BinanceKafkaProducer
 
 
@@ -74,15 +74,11 @@ class BinanceRESTClient:
         )
     """
 
-    # Endpoint REST Binance
-    BASE_URL: str = "https://api.binance.com"
-    KLINES_ENDPOINT: str = "/api/v3/klines"
-
-    # Limite Binance: 1000 klines max par requête
-    MAX_KLINES_PER_REQUEST: int = 1000
-
-    # Délai entre les requêtes pour respecter le rate-limit (ms → s)
-    REQUEST_DELAY_S: float = 0.2
+    # Paramètres REST lus depuis rest_config (centralisé)
+    BASE_URL: str = rest_config.BASE_URL
+    KLINES_ENDPOINT: str = rest_config.KLINES_ENDPOINT
+    MAX_KLINES_PER_REQUEST: int = rest_config.MAX_KLINES_PER_REQUEST
+    REQUEST_DELAY_S: float = rest_config.REQUEST_DELAY_S
 
     def __init__(
         self,
@@ -156,8 +152,10 @@ class BinanceRESTClient:
         open_time_ms: int = int(kline[0])
         close_time_ms: int = int(kline[6])
         num_trades: int = int(kline[8])
-        now_ms: int = int(datetime.now(timezone.utc).timestamp() * 1000)
-        received_at: str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Capturer une seule fois pour éviter des timestamps incohérents
+        now = datetime.now(timezone.utc)
+        now_ms: int = int(now.timestamp() * 1000)
+        received_at: str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         return {
             "stream": stream_name,
@@ -183,7 +181,7 @@ class BinanceRESTClient:
                 },
             },
             "received_at": received_at,
-            "source": "rest_api",   # distingue des données "websocket"
+            "source": rest_config.SOURCE_LABEL,  # distingue des données "websocket"
         }
 
     # ------------------------------------------------------------------
@@ -271,12 +269,13 @@ class BinanceRESTClient:
         end_ms: Optional[int] = self._iso_to_ms(end_time) if end_time else None
 
         total_published = 0
+        total_fetched = 0   # Compteur séparé pour la pagination (indépendant des succès Kafka)
         current_start_ms = start_ms
 
         while True:
-            # Calcul du batch_limit
+            # Calcul du batch_limit basé sur total_fetched (pas total_published)
             if limit is not None:
-                remaining = limit - total_published
+                remaining = limit - total_fetched
                 if remaining <= 0:
                     break
                 batch_limit = min(remaining, self.MAX_KLINES_PER_REQUEST)
@@ -303,6 +302,7 @@ class BinanceRESTClient:
                 break
 
             self.stats["klines_fetched"] += len(klines)
+            total_fetched += len(klines)
 
             # Formatage + publication vers Kafka
             for kline in klines:
@@ -319,8 +319,8 @@ class BinanceRESTClient:
                 f"Total publié: {total_published} | symbol={symbol}"
             )
 
-            # Si moins de MAX_KLINES_PER_REQUEST retournées → on a tout récupéré
-            if len(klines) < self.MAX_KLINES_PER_REQUEST:
+            # Si moins que le batch_limit demandé sont retournées → on a tout récupéré
+            if len(klines) < batch_limit:
                 break
 
             # Pagination: le prochain lot commence juste après la dernière kline
