@@ -18,6 +18,13 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# Condition pour les tests d'intégration (nécessite RUN_INTEGRATION=1)
+RUN_INTEGRATION = os.getenv("RUN_INTEGRATION", "0") == "1"
+skip_integration = pytest.mark.skipif(
+    not RUN_INTEGRATION,
+    reason="Tests d'intégration désactivés. Lancer avec RUN_INTEGRATION=1 pour les activer."
+)
+
 
 # ============================================
 # TEST 1: Formatage kline → format WebSocket
@@ -335,6 +342,7 @@ class TestRESTClientIntegration:
     """Tests d'intégration — appels réels à l'API Binance (sans Kafka)"""
 
     @pytest.mark.integration
+    @skip_integration
     @patch("streaming.binance_rest_client.BinanceKafkaProducer")
     def test_fetch_real_klines_returns_data(self, mock_producer):
         """Vérifie qu'on obtient bien des données de l'API Binance"""
@@ -350,6 +358,7 @@ class TestRESTClientIntegration:
         client.close()
 
     @pytest.mark.integration
+    @skip_integration
     @patch("streaming.binance_rest_client.BinanceKafkaProducer")
     def test_fetch_klines_format_valid(self, mock_producer):
         """Les klines retournées ont des valeurs numériques valides"""
@@ -375,6 +384,7 @@ class TestRESTClientIntegration:
         client.close()
 
     @pytest.mark.integration
+    @skip_integration
     @patch("streaming.binance_rest_client.BinanceKafkaProducer")
     def test_format_and_publish_pipeline(self, mock_producer_class):
         """Test E2E: fetch → format → publication (producer mocké)"""
