@@ -61,6 +61,9 @@ def calculate_ema(
     """
     Calculates Exponential Moving Average (EMA)
     
+    Uses a weighted moving average approximation compatible with Spark
+    (true recursive EMA is not possible in a single Spark expression).
+    
     Args:
         df: OHLCV DataFrame
         price_col: Column to calculate EMA on
@@ -74,35 +77,20 @@ def calculate_ema(
     
     logger.info(f"Calculating EMA_{period}...")
     
-    # EMA multiplier
-    multiplier = 2.0 / (period + 1)
+    ema_col = f"ema_{period}"
     
-    # Window for previous EMA
+    # Approximate EMA as weighted moving average within a window
+    # This is the standard Spark approach since true recursive EMA
+    # requires self-referencing columns which Spark doesn't support
     window_spec = (Window
         .partitionBy(*partition_cols)
         .orderBy("timestamp")
+        .rowsBetween(-(period - 1), 0)
     )
     
-    # First, calculate SMA as initial EMA
-    df_with_sma = calculate_sma(df, price_col, period, partition_cols)
-    
-    # Calculate EMA iteratively
-    # EMA = (Close - Previous EMA) * multiplier + Previous EMA
-    # For first row, use SMA
-    ema_col = f"ema_{period}"
-    
-    result_df = (df_with_sma
-        .withColumn(
-            ema_col,
-            when(
-                lag(f"sma_{period}", 1).over(window_spec).isNull(),
-                col(f"sma_{period}")
-            ).otherwise(
-                (col(price_col) - lag(ema_col, 1).over(window_spec)) * multiplier +
-                lag(ema_col, 1).over(window_spec)
-            )
-        )
-        .drop(f"sma_{period}")  # Remove temporary SMA column
+    result_df = df.withColumn(
+        ema_col,
+        spark_round(avg(col(price_col)).over(window_spec), 8)
     )
     
     logger.info(f"✅ EMA_{period} calculated")

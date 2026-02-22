@@ -93,6 +93,45 @@ class SparkConfig:
 
 
 @dataclass
+class CleaningConfig:
+    """Configuration pour le nettoyage des données"""
+    # Colonnes critiques (lignes supprimées si null)
+    required_columns: List[str] = None
+    
+    # Seuil Z-score pour détection d'outliers
+    zscore_threshold: float = 3.0
+    
+    # Seuil de variation de prix pour détecter les spikes (5%)
+    price_spike_threshold: float = 0.05
+    
+    def __post_init__(self):
+        if self.required_columns is None:
+            self.required_columns = [
+                'symbol', 'interval', 'timestamp',
+                'open', 'high', 'low', 'close', 'volume'
+            ]
+
+
+@dataclass
+class TechnicalIndicatorsConfig:
+    """Configuration pour les indicateurs techniques"""
+    rsi_period: int = 14
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    bollinger_period: int = 20
+    bollinger_std: float = 2.0
+    sma_periods: List[int] = None
+    ema_periods: List[int] = None
+    
+    def __post_init__(self):
+        if self.sma_periods is None:
+            self.sma_periods = [20, 50, 200]
+        if self.ema_periods is None:
+            self.ema_periods = [12, 26]
+
+
+@dataclass
 class ProcessingConfig:
     """Data processing configuration"""
     # Symbols to process
@@ -134,6 +173,8 @@ kafka_config = KafkaConfig()
 mongodb_config = MongoDBConfig()
 spark_config = SparkConfig()
 processing_config = ProcessingConfig()
+cleaning_config = CleaningConfig()
+indicators_config = TechnicalIndicatorsConfig()
 
 
 def get_all_config():
