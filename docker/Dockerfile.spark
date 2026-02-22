@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────
+# Dockerfile.spark — Image Spark custom avec dépendances ML
+# Utilisé par spark-master et spark-worker
+# ─────────────────────────────────────────────────────────────
+FROM apache/spark:3.5.0
+
+USER root
+
+# Dépendances système nécessaires pour numpy/scipy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    python3-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installer les dépendances Python
+COPY docker/requirements-spark.txt /tmp/requirements-spark.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements-spark.txt \
+    && rm /tmp/requirements-spark.txt
+
+# Copier le code source du projet (processing + ml)
+COPY src/ /opt/spark/work-dir/src/
+
+# Ajouter src au PYTHONPATH pour les imports
+ENV PYTHONPATH="${PYTHONPATH}:/opt/spark/work-dir/src"
+
+USER spark

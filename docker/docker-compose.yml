@@ -117,19 +117,25 @@ services:
   # APACHE SPARK
   # ============================================
   spark-master:
-    image: apache/spark:3.5.0
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.spark
     container_name: spark-master
     environment:
       - SPARK_MODE=master
     ports:
       - "8080:8080"
       - "7077:7077"
+    volumes:
+      - ../src:/opt/spark/work-dir/src
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     networks:
       - datamlops-network
 
   spark-worker:
-    image: apache/spark:3.5.0
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.spark
     container_name: spark-worker
     depends_on:
       - spark-master
@@ -137,6 +143,8 @@ services:
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=2G
       - SPARK_WORKER_CORES=2
+    volumes:
+      - ../src:/opt/spark/work-dir/src
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     networks:
       - datamlops-network
