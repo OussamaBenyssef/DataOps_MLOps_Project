@@ -163,10 +163,14 @@ services:
       - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here
       - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - _PIP_ADDITIONAL_REQUIREMENTS=pymongo==4.6.1 requests==2.31.0 kafka-python==2.0.2
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
+      - ../dags:/opt/airflow/dags
+      - ../src:/opt/airflow/src
       - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8081:8080"
     command: webserver
@@ -183,10 +187,14 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow123@postgres:5432/airflow
       - AIRFLOW__CORE__FERNET_KEY=your-fernet-key-here
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - _PIP_ADDITIONAL_REQUIREMENTS=pymongo==4.6.1 requests==2.31.0 kafka-python==2.0.2
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
+      - ../dags:/opt/airflow/dags
+      - ../src:/opt/airflow/src
       - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
     command: scheduler
     networks:
       - datamlops-network
