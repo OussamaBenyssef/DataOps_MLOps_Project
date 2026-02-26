@@ -6,7 +6,10 @@ Handles writing DataFrames to MongoDB collections with error handling and retry 
 from pyspark.sql import DataFrame
 from pyspark.sql.streaming import StreamingQuery
 import logging
-from .config import mongodb_config, spark_config
+try:
+    from .config import mongodb_config, spark_config
+except ImportError:
+    from config import mongodb_config, spark_config
 
 logger = logging.getLogger(__name__)
 

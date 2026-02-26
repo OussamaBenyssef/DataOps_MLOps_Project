@@ -36,13 +36,19 @@ from mongodb_writer import (
 from config import processing_config
 
 # Configure logging
+import os
+_log_handlers = [logging.StreamHandler(sys.stdout)]
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+try:
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_handlers.append(logging.FileHandler(os.path.join(_log_dir, 'spark_processing.log')))
+except OSError:
+    pass  # Fallback to stdout only (e.g. inside Docker container)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('logs/spark_processing.log')
-    ]
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
 

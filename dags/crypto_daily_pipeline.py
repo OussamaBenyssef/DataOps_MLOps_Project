@@ -54,16 +54,19 @@ def check_services(**context):
 
     results = {}
     for name, (host, port) in services.items():
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(10)
             sock.connect((host, port))
-            sock.close()
             results[name] = "✅ UP"
             logger.info(f"{name} ({host}:{port}) — UP")
         except (socket.timeout, ConnectionRefusedError, OSError) as e:
             results[name] = f"❌ DOWN ({e})"
             logger.error(f"{name} ({host}:{port}) — DOWN: {e}")
+        finally:
+            if sock:
+                sock.close()
 
     # Vérifier que tous les services sont UP
     failed = [name for name, status in results.items() if "DOWN" in status]
@@ -134,33 +137,20 @@ def collect_historical_data(**context):
                 if not klines:
                     break
 
-                # Publier chaque kline dans Kafka au format WebSocket
+                # Publier chaque kline dans Kafka (format plat RAW_KLINES_SCHEMA)
                 for kline in klines:
                     message = {
-                        "stream": f"{symbol.lower()}@kline_{KLINE_INTERVAL}",
-                        "data": {
-                            "e": "kline",
-                            "E": int(datetime.now(timezone.utc).timestamp() * 1000),
-                            "s": symbol,
-                            "k": {
-                                "t": kline[0],          # open_time
-                                "T": kline[6],          # close_time
-                                "s": symbol,
-                                "i": KLINE_INTERVAL,
-                                "o": kline[1],          # open
-                                "h": kline[2],          # high
-                                "l": kline[3],          # low
-                                "c": kline[4],          # close
-                                "v": kline[5],          # volume
-                                "n": kline[8],          # num_trades
-                                "x": True,              # is_closed
-                                "q": kline[7],          # quote_volume
-                                "V": kline[9],          # taker_buy_base
-                                "Q": kline[10],         # taker_buy_quote
-                            },
-                        },
-                        "received_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "source": "airflow_daily",
+                        "symbol": symbol,
+                        "interval": KLINE_INTERVAL,
+                        "open_time": kline[0],
+                        "close_time": kline[6],
+                        "open": float(kline[1]),
+                        "high": float(kline[2]),
+                        "low": float(kline[3]),
+                        "close": float(kline[4]),
+                        "volume": float(kline[5]),
+                        "quote_volume": float(kline[7]),
+                        "trades_count": int(kline[8]),
                     }
 
                     producer.send(

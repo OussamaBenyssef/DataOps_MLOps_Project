@@ -10,7 +10,10 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.window import Window
 import logging
-from .config import processing_config
+try:
+    from .config import processing_config
+except ImportError:
+    from config import processing_config
 
 logger = logging.getLogger(__name__)
 
