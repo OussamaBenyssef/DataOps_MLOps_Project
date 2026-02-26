@@ -12,7 +12,10 @@ from pyspark.sql.types import (
     LongType, BooleanType, TimestampType
 )
 import logging
-from .config import kafka_config
+try:
+    from .config import kafka_config
+except ImportError:
+    from config import kafka_config
 
 logger = logging.getLogger(__name__)
 

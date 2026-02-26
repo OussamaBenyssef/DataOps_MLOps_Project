@@ -18,7 +18,10 @@ from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType, LongType, IntegerType
 )
 
-from .config import CleaningConfig
+try:
+    from .config import CleaningConfig
+except ImportError:
+    from config import CleaningConfig
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,10 @@ Creates and configures SparkSession with Kafka and MongoDB support
 from pyspark.sql import SparkSession
 from pyspark.conf import SparkConf
 import logging
-from .config import spark_config
+try:
+    from .config import spark_config
+except ImportError:
+    from config import spark_config
 
 # Configure logging
 logging.basicConfig(
