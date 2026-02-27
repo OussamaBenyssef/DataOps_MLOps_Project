@@ -6,7 +6,7 @@ python-binance==1.0.19
 websocket-client==1.7.0
 
 # Kafka
-kafka-python==2.0.2
+kafka-python-ng
 confluent-kafka==2.3.0
 
 # Spark
