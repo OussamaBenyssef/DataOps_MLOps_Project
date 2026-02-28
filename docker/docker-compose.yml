@@ -123,6 +123,8 @@ services:
     container_name: spark-master
     environment:
       - SPARK_MODE=master
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -143,6 +145,8 @@ services:
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=2G
       - SPARK_WORKER_CORES=2
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
     volumes:
       - ../src:/opt/spark/work-dir/src
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077

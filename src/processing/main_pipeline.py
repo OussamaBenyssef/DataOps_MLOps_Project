@@ -13,7 +13,9 @@ from spark_session import create_spark_session, stop_spark_session
 from kafka_consumer import (
     consume_trades_stream,
     consume_klines_stream,
-    aggregate_trades_to_ohlcv
+    aggregate_trades_to_ohlcv,
+    create_kafka_stream,
+    parse_raw_klines,
 )
 from transformations import (
     validate_trades_data,
@@ -22,18 +24,20 @@ from transformations import (
     add_interval_column,
     calculate_price_change,
     calculate_volume_metrics,
-    add_candle_pattern
+    add_candle_pattern,
+    detect_anomalies,
 )
 from technical_indicators import calculate_all_indicators
 from mongodb_writer import (
     write_trades_to_mongodb,
     write_ohlcv_to_mongodb,
     write_indicators_to_mongodb,
+    write_to_mongodb_batch,
     write_to_console,
     await_termination,
     stop_all_queries
 )
-from config import processing_config
+from config import processing_config, kafka_config, mongodb_config
 
 # Configure logging
 import os
@@ -141,7 +145,8 @@ def run_streaming_pipeline(spark: SparkSession, debug: bool = False):
             logger.info(f"Processing micro-batch {batch_id} (count: {batch_df.count()})")
             
             # Since we are in a batch context now, we can use Window functions safely
-            from pyspark.sql.functions import avg
+            from pyspark.sql.functions import avg, col
+            from pyspark.sql.window import Window
             
             # 1. Calculate technical indicators
             indicators_df = calculate_all_indicators(batch_df)
@@ -151,12 +156,11 @@ def run_streaming_pipeline(spark: SparkSession, debug: bool = False):
             batch_df_with_avg_vol = indicators_df.withColumn(
                 "avg_volume_batch", 
                 avg("volume").over(
-                    __import__('pyspark.sql.window', fromlist=['Window']).Window.partitionBy("symbol")
+                    Window.partitionBy("symbol")
                 )
             )
 
             # 3. Detect Anomalies
-            from transformations import detect_anomalies
             anomalies_df = detect_anomalies(batch_df_with_avg_vol)
             
             # Filter only anomalies for the anomalies collection
@@ -185,9 +189,6 @@ def run_streaming_pipeline(spark: SparkSession, debug: bool = False):
                 logger.info("--- DEBUG: Anomalies ---")
                 anomalies_to_write.show(5, truncate=False)
             else:
-                from mongodb_writer import write_to_mongodb_batch
-                from config import mongodb_config
-                
                 # Write to indicators collection
                 write_to_mongodb_batch(
                     inds_to_write, 
@@ -242,15 +243,136 @@ def run_streaming_pipeline(spark: SparkSession, debug: bool = False):
 
 def run_batch_pipeline(spark: SparkSession):
     """
-    Runs a batch processing pipeline (for historical data)
+    Runs a batch processing pipeline (for historical data).
+    Reads all existing klines from Kafka, applies transformations,
+    calculates technical indicators, detects anomalies,
+    and writes results to MongoDB.
     
     Args:
         spark: SparkSession instance
     """
+    from pyspark.sql.functions import avg, col
+    from pyspark.sql.window import Window
+    
     logger.info("=" * 60)
-    logger.info("BATCH PIPELINE - Not yet implemented")
+    logger.info("STARTING BATCH PIPELINE")
     logger.info("=" * 60)
-    logger.warning("Batch mode is not yet implemented. Use streaming mode.")
+    
+    try:
+        # ============================================
+        # STEP 1: Read klines from Kafka (batch mode)
+        # ============================================
+        logger.info("\n[STEP 1] Reading klines from Kafka (batch)...")
+        
+        kafka_df = (spark
+            .read
+            .format("kafka")
+            .option("kafka.bootstrap.servers", kafka_config.bootstrap_servers)
+            .option("subscribe", kafka_config.raw_klines_topic)
+            .option("startingOffsets", "earliest")
+            .option("endingOffsets", "latest")
+            .load()
+        )
+        
+        total_messages = kafka_df.count()
+        logger.info(f"  Read {total_messages} messages from Kafka topic '{kafka_config.raw_klines_topic}'")
+        
+        if total_messages == 0:
+            logger.warning("No data found in Kafka. Exiting batch pipeline.")
+            return
+        
+        # Parse klines (handles both flat and WebSocket formats)
+        klines_df = parse_raw_klines(kafka_df)
+        
+        # ============================================
+        # STEP 2: Validate and enrich OHLCV data
+        # ============================================
+        logger.info("\n[STEP 2] Validating and enriching OHLCV data...")
+        
+        klines_df = validate_ohlcv_data(klines_df)
+        klines_df = calculate_price_change(klines_df)
+        klines_df = calculate_volume_metrics(klines_df)
+        klines_df = add_candle_pattern(klines_df)
+        klines_df = add_metadata_columns(klines_df)
+        
+        # Deduplicate: Kafka streaming produces duplicates for the same candle
+        klines_df = klines_df.dropDuplicates(["symbol", "interval", "timestamp"])
+        
+        valid_count = klines_df.count()
+        logger.info(f"  {valid_count} valid klines after cleaning")
+        
+        if valid_count == 0:
+            logger.warning("No valid klines after cleaning. Exiting batch pipeline.")
+            return
+        
+        # Write OHLCV to MongoDB
+        logger.info("  Writing OHLCV to MongoDB...")
+        write_to_mongodb_batch(klines_df, mongodb_config.ohlcv_collection, mode="append")
+        logger.info(f"  ✅ {valid_count} OHLCV records written to MongoDB")
+        
+        # ============================================
+        # STEP 3: Calculate technical indicators
+        # ============================================
+        logger.info("\n[STEP 3] Calculating technical indicators...")
+        
+        indicators_df = calculate_all_indicators(klines_df)
+        
+        # Select relevant columns
+        inds_to_write = indicators_df.select(
+            "symbol", "interval", "timestamp",
+            "rsi_14", "macd", "macd_signal", "macd_histogram",
+            "bollinger_upper", "bollinger_middle", "bollinger_lower",
+            "sma_20", "sma_50", "sma_200", "ema_12", "ema_26"
+        )
+        inds_to_write = add_metadata_columns(inds_to_write)
+        
+        indicators_count = inds_to_write.count()
+        logger.info(f"  {indicators_count} indicator records calculated")
+        
+        # Write indicators to MongoDB
+        write_to_mongodb_batch(inds_to_write, mongodb_config.indicators_collection, mode="append")
+        logger.info(f"  ✅ {indicators_count} indicators written to MongoDB")
+        
+        # ============================================
+        # STEP 4: Detect anomalies
+        # ============================================
+        logger.info("\n[STEP 4] Detecting anomalies...")
+        
+        # Add avg_volume for anomaly detection
+        indicators_with_avg = indicators_df.withColumn(
+            "avg_volume_batch",
+            avg("volume").over(Window.partitionBy("symbol"))
+        )
+        
+        anomalies_df = detect_anomalies(indicators_with_avg)
+        anomalies_to_write = anomalies_df.filter(col("is_anomaly") == True)
+        
+        anomaly_count = anomalies_to_write.count()
+        if anomaly_count > 0:
+            anomalies_to_write = anomalies_to_write.select(
+                "symbol", "interval", "timestamp", "close", "volume",
+                "price_change_percent", "is_price_drop_anomaly", "is_volume_spike_anomaly"
+            )
+            anomalies_to_write = add_metadata_columns(anomalies_to_write)
+            
+            write_to_mongodb_batch(anomalies_to_write, mongodb_config.anomalies_collection, mode="append")
+            logger.warning(f"  🚨 {anomaly_count} anomalies detected and written to MongoDB")
+        else:
+            logger.info("  ✅ No anomalies detected")
+        
+        # ============================================
+        # Summary
+        # ============================================
+        logger.info("\n" + "=" * 60)
+        logger.info("BATCH PIPELINE COMPLETED SUCCESSFULLY")
+        logger.info(f"  OHLCV records:     {valid_count}")
+        logger.info(f"  Indicator records: {indicators_count}")
+        logger.info(f"  Anomalies:         {anomaly_count}")
+        logger.info("=" * 60)
+        
+    except Exception as e:
+        logger.error(f"\n❌ Batch pipeline error: {str(e)}", exc_info=True)
+        raise
 
 
 def main():

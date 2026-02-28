@@ -38,7 +38,7 @@ def write_to_mongodb_batch(
          .option("connection.uri", mongodb_config.uri)
          .option("database", mongodb_config.database)
          .option("collection", collection)
-         .option("replaceDocument", "false")
+         .option("replaceDocument", "true")
          .save()
         )
         
@@ -85,7 +85,7 @@ def write_to_mongodb_stream(
                  .option("database", mongodb_config.database)
                  .option("collection", collection)
                  .option("checkpointLocation", checkpoint_location)
-                 .option("replaceDocument", "false")
+                 .option("replaceDocument", "true")
                  .trigger(processingTime=trigger_interval)
                  .start()
         )

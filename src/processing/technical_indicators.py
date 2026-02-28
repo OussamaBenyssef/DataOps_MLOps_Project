@@ -325,15 +325,16 @@ def calculate_all_indicators(
     for period in processing_config.sma_periods:
         result_df = calculate_sma(result_df, "close", period, partition_cols)
     
-    # EMA
-    for period in processing_config.ema_periods:
-        result_df = calculate_ema(result_df, "close", period, partition_cols)
-    
     # RSI
     result_df = calculate_rsi(result_df, "close", partition_cols=partition_cols)
     
-    # MACD
+    # MACD (must run before standalone EMA because MACD internally
+    # creates then drops ema_12/ema_26 as intermediate columns)
     result_df = calculate_macd(result_df, "close", partition_cols=partition_cols)
+    
+    # EMA (after MACD so columns are not dropped)
+    for period in processing_config.ema_periods:
+        result_df = calculate_ema(result_df, "close", period, partition_cols)
     
     # Bollinger Bands
     result_df = calculate_bollinger_bands(result_df, "close", partition_cols=partition_cols)

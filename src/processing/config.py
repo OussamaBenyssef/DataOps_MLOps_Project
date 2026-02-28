@@ -22,7 +22,7 @@ class KafkaConfig:
     anomalies_topic: str = 'anomalies'
     
     # Kafka options
-    starting_offsets: str = 'latest'  # 'earliest' or 'latest'
+    starting_offsets: str = 'earliest'  # 'earliest' or 'latest'
     max_offsets_per_trigger: int = 10000
     
     def __post_init__(self):
@@ -83,7 +83,7 @@ class SparkConfig:
         if self.packages is None:
             self.packages = [
                 'org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0',
-                'org.mongodb.spark:mongo-spark-connector_2.12:10.2.0'
+                'org.mongodb.spark:mongo-spark-connector_2.12:10.4.0'
             ]
     
     @property
