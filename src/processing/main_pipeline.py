@@ -129,41 +129,88 @@ def run_streaming_pipeline(spark: SparkSession, debug: bool = False):
             queries.append(query_klines)
         
         # ============================================
-        # STEP 4: Calculate Technical Indicators
+        # STEP 4: Calculate Technical Indicators & Anomalies (foreachBatch)
         # ============================================
-        logger.info("\n[STEP 4] Calculating technical indicators...")
+        logger.info("\n[STEP 4] Calculating technical indicators & detecting anomalies...")
         
-        # Calculate indicators on klines data
-        indicators_df = calculate_all_indicators(klines_df)
-        
-        # Select only relevant columns for indicators collection
-        indicators_df = indicators_df.select(
-            "symbol",
-            "interval",
-            "timestamp",
-            "rsi_14",
-            "macd",
-            "macd_signal",
-            "macd_histogram",
-            "bollinger_upper",
-            "bollinger_middle",
-            "bollinger_lower",
-            "sma_20",
-            "sma_50",
-            "sma_200",
-            "ema_12",
-            "ema_26"
+        def process_micro_batch(batch_df, batch_id):
+            # Skip empty batches
+            if batch_df.count() == 0:
+                return
+
+            logger.info(f"Processing micro-batch {batch_id} (count: {batch_df.count()})")
+            
+            # Since we are in a batch context now, we can use Window functions safely
+            from pyspark.sql.functions import avg
+            
+            # 1. Calculate technical indicators
+            indicators_df = calculate_all_indicators(batch_df)
+            
+            # 2. Add an avg_volume_batch for anomaly detection logic (per symbol)
+            # We can calculate the average volume in this micro-batch
+            batch_df_with_avg_vol = indicators_df.withColumn(
+                "avg_volume_batch", 
+                avg("volume").over(
+                    __import__('pyspark.sql.window', fromlist=['Window']).Window.partitionBy("symbol")
+                )
+            )
+
+            # 3. Detect Anomalies
+            from transformations import detect_anomalies
+            anomalies_df = detect_anomalies(batch_df_with_avg_vol)
+            
+            # Filter only anomalies for the anomalies collection
+            anomalies_to_write = anomalies_df.filter(col("is_anomaly") == True)
+            
+            # Select relevant columns for indicators collection
+            inds_to_write = indicators_df.select(
+                "symbol", "interval", "timestamp",
+                "rsi_14", "macd", "macd_signal", "macd_histogram",
+                "bollinger_upper", "bollinger_middle", "bollinger_lower",
+                "sma_20", "sma_50", "sma_200", "ema_12", "ema_26"
+            )
+            inds_to_write = add_metadata_columns(inds_to_write)
+            
+            # Select relevant columns for anomalies collection
+            anomalies_to_write = anomalies_to_write.select(
+                "symbol", "interval", "timestamp", "close", "volume",
+                "price_change_percent", "is_price_drop_anomaly", "is_volume_spike_anomaly"
+            )
+            anomalies_to_write = add_metadata_columns(anomalies_to_write)
+            
+            # Write batch data to MongoDB
+            if debug:
+                logger.info("--- DEBUG: Indicators ---")
+                inds_to_write.show(5, truncate=False)
+                logger.info("--- DEBUG: Anomalies ---")
+                anomalies_to_write.show(5, truncate=False)
+            else:
+                from mongodb_writer import write_to_mongodb_batch
+                from config import mongodb_config
+                
+                # Write to indicators collection
+                write_to_mongodb_batch(
+                    inds_to_write, 
+                    mongodb_config.indicators_collection, 
+                    mode="append"
+                )
+                
+                # Write to anomalies collection
+                if anomalies_to_write.count() > 0:
+                    logger.warning(f"🚨 Detected {anomalies_to_write.count()} anomalies in batch {batch_id}!")
+                    write_to_mongodb_batch(
+                        anomalies_to_write, 
+                        mongodb_config.anomalies_collection, 
+                        mode="append"
+                    )
+
+        # Apply the foreachBatch processor on klines_df
+        query_indicators = (klines_df.writeStream
+            .outputMode("append")
+            .foreachBatch(process_micro_batch)
+            .start()
         )
-        
-        indicators_df = add_metadata_columns(indicators_df)
-        
-        # Write indicators to MongoDB or console
-        if debug:
-            query_indicators = write_to_console(indicators_df, truncate=False, num_rows=5)
-            queries.append(query_indicators)
-        else:
-            query_indicators = write_indicators_to_mongodb(indicators_df, streaming=True)
-            queries.append(query_indicators)
+        queries.append(query_indicators)
         
         # ============================================
         # STEP 5: Monitor and Wait

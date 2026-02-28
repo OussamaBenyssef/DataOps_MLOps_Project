@@ -183,6 +183,36 @@ def detect_price_spikes(
     return result_df
 
 
+def detect_anomalies(df: DataFrame) -> DataFrame:
+    """
+    Central anomaly detection function for rule-based anomalies
+    Rules:
+      - Price drop > 5%
+      - Volume spike > 3x average volume (must have avg_volume computed beforehand or available in the micro-batch)
+      
+    Args:
+        df: DataFrame with price_change_percent and volume, avg_volume_batch
+    Returns:
+        DataFrame with anomaly flags and a general 'is_anomaly' flag.
+    """
+    logger.info("Detecting anomalies (Price Drop > 5% and Volume Spikes)...")
+    
+    # Needs price_change_percent, volume, and avg_volume_batch (computed in foreachBatch)
+    result_df = df.withColumn(
+        "is_price_drop_anomaly",
+        col("price_change_percent") < -5.0
+    ).withColumn(
+        "is_volume_spike_anomaly",
+        col("volume") > (col("avg_volume_batch") * 3)
+    ).withColumn(
+        "is_anomaly",
+        col("is_price_drop_anomaly") | col("is_volume_spike_anomaly")
+    )
+    
+    logger.info("✅ Anomaly detection complete")
+    return result_df
+
+
 def calculate_volume_metrics(df: DataFrame) -> DataFrame:
     """
     Calculates volume-based metrics
