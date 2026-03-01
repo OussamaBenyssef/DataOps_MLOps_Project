@@ -250,11 +250,8 @@ class CryptoPricePredictor:
 
         # Build model
         model = tf.keras.Sequential([
-            tf.keras.layers.LSTM(
-                64,
-                return_sequences=True,
-                input_shape=(self.sequence_length, n_features)
-            ),
+            tf.keras.layers.Input(shape=(self.sequence_length, n_features)),
+            tf.keras.layers.LSTM(64, return_sequences=True),
             tf.keras.layers.Dropout(0.2),
             tf.keras.layers.LSTM(32, return_sequences=False),
             tf.keras.layers.Dropout(0.2),
