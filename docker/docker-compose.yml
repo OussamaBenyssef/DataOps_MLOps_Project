@@ -387,6 +387,23 @@ services:
     networks:
       - datamlops-network
 
+    # P5 : container used to run ingestion commands with local recipes
+  datahub-actions:
+    image: acryldata/datahub-actions:head
+    container_name: datahub-actions
+    hostname: datahub-actions
+    depends_on:
+      - datahub-gms
+      - mongodb
+      - kafka
+    environment:
+      - DATAHUB_GMS_URL=http://datahub-gms:8080
+    volumes:
+      - ../datahub/recipes:/etc/datahub/recipes:ro
+    command: ["sleep", "infinity"]
+    networks:
+      - datamlops-network
+    
 networks:
   datamlops-network:
     driver: bridge
