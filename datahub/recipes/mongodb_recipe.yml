@@ -1,0 +1,14 @@
+source:
+  type: mongodb
+  config:
+    connect_uri: "mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin"
+    username: "datamlops"
+    password: "datamlops123"
+    database_pattern:
+      allow:
+        - "cryptomarket"
+
+sink:
+  type: datahub-rest
+  config:
+    server: "http://datahub-gms:8080"
