@@ -1,0 +1,19 @@
+source:
+  type: kafka
+  config:
+    connection:
+      bootstrap: "kafka:9092"
+      schema_registry_url: "http://datahub-gms:8080/schema-registry/api/"
+    topic_pattern:
+      allow:
+        - "raw_trades"
+        - "raw_klines"
+        - "processed_data"
+        - "anomalies"
+
+time_zone: "UTC"
+
+sink:
+  type: datahub-rest
+  config:
+    server: "http://datahub-gms:8080"
