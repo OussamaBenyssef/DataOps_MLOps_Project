@@ -128,6 +128,8 @@ services:
       - "7077:7077"
     volumes:
       - ../src:/opt/spark/work-dir/src
+      - ../tests:/opt/spark/work-dir/tests
+      - ../pytest.ini:/opt/spark/work-dir/pytest.ini
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     networks:
       - datamlops-network
