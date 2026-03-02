@@ -365,6 +365,7 @@ services:
       - MCE_CONSUMER_ENABLED=true
       - ENTITY_SERVICE_ENABLE_RETENTION=true
       - ENTITY_REGISTRY_CONFIG_PATH=/datahub/datahub-gms/resources/entity-registry.yml
+      - METADATA_SERVICE_AUTH_ENABLED=false
     depends_on:
       datahub-mysql:
         condition: service_healthy
