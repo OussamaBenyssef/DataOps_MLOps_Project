@@ -59,6 +59,23 @@ class FeatureConfig:
 
 
 @dataclass
+class AnomalyConfig:
+    """Anomaly detection model parameters"""
+    # Isolation Forest
+    contamination: float = 0.05          # Expected anomaly ratio
+    n_estimators: int = 100              # Number of trees
+
+    # Autoencoder
+    autoencoder_epochs: int = 50
+    autoencoder_batch_size: int = 32
+    autoencoder_latent_dim: int = 8      # Bottleneck dimension
+    reconstruction_threshold_percentile: float = 95.0  # Percentile cutoff
+
+    # MLflow
+    experiment_name: str = 'crypto-anomaly-detection'
+
+
+@dataclass
 class ModelConfig:
     """Model training and serving configuration"""
     mlflow_tracking_uri: str = os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:5001')
@@ -74,4 +91,5 @@ class ModelConfig:
 # Global configuration instances
 mongodb_config = MongoDBConfig()
 feature_config = FeatureConfig()
+anomaly_config = AnomalyConfig()
 model_config = ModelConfig()

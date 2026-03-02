@@ -22,7 +22,7 @@ RUN pip3 install --no-cache-dir -r /tmp/requirements-spark.txt \
 # Copier le code source du projet (processing + ml)
 COPY src/ /opt/spark/work-dir/src/
 
-# Ajouter src au PYTHONPATH pour les imports
-ENV PYTHONPATH="${PYTHONPATH}:/opt/spark/work-dir/src"
+# Ajouter src + PySpark + py4j au PYTHONPATH pour les imports
+ENV PYTHONPATH="${PYTHONPATH}:/opt/spark/work-dir/src:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip"
 
 USER spark
