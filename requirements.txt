@@ -50,3 +50,6 @@ pytest-cov==4.1.0
 python-dotenv==1.0.0
 requests==2.32.3pydantic==2.5.3
 kafka-python-ng
+
+# DataHub CLI (for local metadata ingestion commands)
+acryl-datahub>=0.13.0
