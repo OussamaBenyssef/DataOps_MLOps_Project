@@ -195,10 +195,57 @@ db.predictions.createIndex({ model_name: 1, symbol: 1, predicted_at: -1 }, { nam
 db.predictions.createIndex({ predicted_at: 1 }, { name: 'idx_predictions_ttl', expireAfterSeconds: 2592000 }); // TTL 30 jours
 
 // ============================================
+// COLLECTION 6: aggregated_metrics
+// Métriques agrégées calculées par Spark (daily, hourly)
+// TTL: 180 jours
+// ============================================
+db.createCollection('aggregated_metrics', {
+    validator: {
+        $jsonSchema: {
+            bsonType: 'object',
+            required: ['symbol', 'interval', 'period_start', 'period_end', 'avg_price', 'total_volume'],
+            properties: {
+                symbol: { bsonType: 'string', description: 'Paire de trading (ex: BTCUSDT)' },
+                interval: { bsonType: 'string', enum: ['1h', '4h', '1d', '1w'], description: 'Période d\'agrégation' },
+                period_start: { bsonType: 'date', description: 'Début de la période' },
+                period_end: { bsonType: 'date', description: 'Fin de la période' },
+                // Prix
+                avg_price: { bsonType: 'double', description: 'Prix moyen (close)' },
+                min_price: { bsonType: 'double', description: 'Prix minimum' },
+                max_price: { bsonType: 'double', description: 'Prix maximum' },
+                open_price: { bsonType: 'double', description: 'Prix d\'ouverture (premier close)' },
+                close_price: { bsonType: 'double', description: 'Prix de clôture (dernier close)' },
+                price_volatility: { bsonType: 'double', description: 'Écart-type des prix close' },
+                price_range_pct: { bsonType: 'double', description: '(max - min) / min * 100' },
+                period_return_pct: { bsonType: 'double', description: '(close - open) / open * 100' },
+                // Volume
+                total_volume: { bsonType: 'double', description: 'Volume total sur la période' },
+                avg_volume: { bsonType: 'double', description: 'Volume moyen par bougie' },
+                total_trades: { bsonType: 'int', description: 'Nombre total de trades' },
+                // VWAP
+                vwap: { bsonType: 'double', description: 'Volume-Weighted Average Price' },
+                // Metadata
+                num_candles: { bsonType: 'int', description: 'Nombre de bougies agrégées' },
+                calculated_at: { bsonType: 'date', description: 'Date de calcul' }
+            }
+        }
+    },
+    validationLevel: 'moderate',
+    validationAction: 'warn'
+});
+
+// Index unique pour éviter les doublons de métriques agrégées
+db.aggregated_metrics.createIndex(
+    { symbol: 1, interval: 1, period_start: -1 },
+    { name: 'idx_agg_metrics_symbol_interval_period', unique: true }
+);
+db.aggregated_metrics.createIndex({ calculated_at: 1 }, { name: 'idx_agg_metrics_ttl', expireAfterSeconds: 15552000 }); // TTL 180 jours
+
+// ============================================
 // RÉSUMÉ
 // ============================================
 print('');
 print('✅ Database cryptomarket initialized');
-print('📦 Collections: raw_trades, ohlcv, indicators, anomalies, predictions');
+print('📦 Collections: raw_trades, ohlcv, indicators, anomalies, predictions, aggregated_metrics');
 print('🔑 Indexes: compound, unique, TTL');
 print('');

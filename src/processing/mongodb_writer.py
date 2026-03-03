@@ -180,6 +180,26 @@ def write_anomalies_to_mongodb(df: DataFrame, streaming: bool = True) -> Streami
         return None
 
 
+def write_aggregated_metrics_to_mongodb(df: DataFrame, streaming: bool = True) -> StreamingQuery:
+    """
+    Writes aggregated metrics to MongoDB aggregated_metrics collection
+    
+    Args:
+        df: Aggregated metrics DataFrame
+        streaming: Whether this is a streaming DataFrame
+    
+    Returns:
+        StreamingQuery if streaming, None otherwise
+    """
+    collection = mongodb_config.daily_metrics_collection
+    
+    if streaming:
+        return write_to_mongodb_stream(df, collection)
+    else:
+        write_to_mongodb_batch(df, collection)
+        return None
+
+
 def write_to_console(
     df: DataFrame,
     truncate: bool = False,

@@ -25,10 +25,12 @@ from transformations import (
     add_candle_pattern
 )
 from technical_indicators import calculate_all_indicators
+from aggregated_metrics import calculate_daily_metrics, calculate_hourly_metrics
 from mongodb_writer import (
     write_trades_to_mongodb,
     write_ohlcv_to_mongodb,
     write_indicators_to_mongodb,
+    write_aggregated_metrics_to_mongodb,
     write_to_console,
     await_termination,
     stop_all_queries
@@ -166,9 +168,26 @@ def run_streaming_pipeline(spark: SparkSession, debug: bool = False):
             queries.append(query_indicators)
         
         # ============================================
-        # STEP 5: Monitor and Wait
+        # STEP 5: Calculate Aggregated Metrics
         # ============================================
-        logger.info("\n[STEP 5] Pipeline running. Monitoring queries...")
+        logger.info("\n[STEP 5] Calculating aggregated metrics...")
+        
+        # Calculate daily aggregated metrics on klines data
+        daily_metrics_df = calculate_daily_metrics(klines_df)
+        daily_metrics_df = add_metadata_columns(daily_metrics_df)
+        
+        # Write aggregated metrics to MongoDB or console
+        if debug:
+            query_agg = write_to_console(daily_metrics_df, truncate=False, num_rows=5)
+            queries.append(query_agg)
+        else:
+            query_agg = write_aggregated_metrics_to_mongodb(daily_metrics_df, streaming=True)
+            queries.append(query_agg)
+        
+        # ============================================
+        # STEP 6: Monitor and Wait
+        # ============================================
+        logger.info("\n[STEP 6] Pipeline running. Monitoring queries...")
         logger.info(f"Active queries: {len(queries)}")
         for i, query in enumerate(queries):
             if query:

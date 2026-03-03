@@ -48,7 +48,7 @@ class MongoDBConfig:
     indicators_collection: str = 'indicators'
     anomalies_collection: str = 'anomalies'
     predictions_collection: str = 'predictions'
-    daily_metrics_collection: str = 'daily_metrics'
+    daily_metrics_collection: str = 'aggregated_metrics'
     
     # Write options
     batch_size: int = 1000
