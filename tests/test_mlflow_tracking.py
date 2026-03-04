@@ -35,8 +35,9 @@ def mlflow_tmpdir():
 
 @pytest.fixture(scope="module")
 def tracker(mlflow_tmpdir):
-    """MLflowExperimentTracker using local file store."""
-    tracking_uri = f"file:///{mlflow_tmpdir.replace(os.sep, '/')}"
+    """MLflowExperimentTracker using local SQLite store (avoids file-store deprecation)."""
+    db_path = os.path.join(mlflow_tmpdir, "mlflow.db").replace(os.sep, "/")
+    tracking_uri = f"sqlite:///{db_path}"
     return MLflowExperimentTracker(tracking_uri=tracking_uri)
 
 

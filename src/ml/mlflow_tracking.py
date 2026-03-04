@@ -336,24 +336,27 @@ class MLflowExperimentTracker:
         stage: str = "Production",
     ) -> bool:
         """
-        Transitions a model version to a new stage.
+        Promotes a model version by setting an alias.
+
+        Uses the modern alias-based API instead of the deprecated
+        stage-based transition_model_version_stage.
 
         Args:
             model_name: Registry model name
             version:    Model version number
-            stage:      Target stage ('Staging', 'Production', 'Archived')
+            stage:      Alias name (e.g. 'Staging', 'Production')
 
         Returns:
             True if successful
         """
         try:
-            self.client.transition_model_version_stage(
+            alias = stage.lower().replace(" ", "-")
+            self.client.set_registered_model_alias(
                 name=model_name,
+                alias=alias,
                 version=version,
-                stage=stage,
-                archive_existing_versions=(stage == "Production"),
             )
-            logger.info(f"  Model '{model_name}' v{version} -> {stage}")
+            logger.info(f"  Model '{model_name}' v{version} -> @{alias}")
             return True
         except Exception as e:
             logger.error(f"Failed to promote model: {e}")
@@ -361,7 +364,7 @@ class MLflowExperimentTracker:
 
     def load_production_model(self, model_name: str) -> Optional[Any]:
         """
-        Loads the current Production-stage model from the registry.
+        Loads the model with the 'production' alias from the registry.
 
         Args:
             model_name: Registry model name
@@ -370,7 +373,7 @@ class MLflowExperimentTracker:
             Loaded model or None
         """
         try:
-            model_uri = f"models:/{model_name}/Production"
+            model_uri = f"models:/{model_name}@production"
             model = mlflow.pyfunc.load_model(model_uri)
             logger.info(f"  Loaded production model '{model_name}'")
             return model
