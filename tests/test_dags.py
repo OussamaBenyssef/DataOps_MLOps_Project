@@ -580,7 +580,8 @@ class TestAlertesDAG:
 class TestDailyPipelineDAG:
     """Tests des fonctions tâches du DAG crypto_daily_pipeline."""
 
-    def test_check_services_raises_when_down(self):
+    @patch("socket.create_connection", side_effect=OSError("Connection refused"))
+    def test_check_services_raises_when_down(self, _mock_socket):
         """check_services lève RuntimeError si services inaccessibles."""
         from dags.crypto_daily_pipeline import check_services
 
