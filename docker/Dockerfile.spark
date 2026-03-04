@@ -1,6 +1,7 @@
 # ─────────────────────────────────────────────────────────────
-# Dockerfile.spark — Image Spark custom avec dépendances ML
+# Dockerfile.spark — Image Spark custom pour ETL uniquement
 # Utilisé par spark-master et spark-worker
+# Rôle: Ingestion Kafka → Nettoyage → Indicateurs → MongoDB
 # ─────────────────────────────────────────────────────────────
 FROM apache/spark:3.5.0
 
@@ -14,15 +15,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Installer les dépendances Python
+# Installer les dépendances Python ETL
 COPY docker/requirements-spark.txt /tmp/requirements-spark.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements-spark.txt \
     && rm /tmp/requirements-spark.txt
 
-# Copier le code source du projet (processing + ml)
+# Copier le code source du processing
 COPY src/ /opt/spark/work-dir/src/
 
-# Ajouter src + PySpark + py4j au PYTHONPATH pour les imports
+# PYTHONPATH: src + PySpark + py4j
 ENV PYTHONPATH="${PYTHONPATH}:/opt/spark/work-dir/src:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip"
 
 USER spark

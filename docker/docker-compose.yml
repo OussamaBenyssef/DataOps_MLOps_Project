@@ -171,6 +171,8 @@ services:
     volumes:
       - ../dags:/opt/airflow/dags
       - ../src:/opt/airflow/src
+      - ../tests:/opt/airflow/tests
+      - ../pytest.ini:/opt/airflow/pytest.ini
       - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -228,6 +230,27 @@ services:
     volumes:
       - mlflow_artifacts:/mlflow
     command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root /mlflow/artifacts
+    networks:
+      - datamlops-network
+
+  # ============================================
+  # ML TRAINER (Expérimentation + Entraînement)
+  # ============================================
+  ml-trainer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ml
+    container_name: ml-trainer
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
+    volumes:
+      - ../src:/app/src
+      - ../tests:/app/tests
+      - ../pytest.ini:/app/pytest.ini
+    depends_on:
+      - mlflow
+      - mongodb
     networks:
       - datamlops-network
 
@@ -362,6 +385,8 @@ services:
       - MAE_CONSUMER_ENABLED=true
       - MCE_CONSUMER_ENABLED=true
       - ENTITY_SERVICE_ENABLE_RETENTION=true
+      - ENTITY_REGISTRY_CONFIG_PATH=/datahub/datahub-gms/resources/entity-registry.yml
+      - METADATA_SERVICE_AUTH_ENABLED=false
     depends_on:
       datahub-mysql:
         condition: service_healthy
@@ -388,7 +413,6 @@ services:
       - datahub-gms
     networks:
       - datamlops-network
-
     # P5 : container used to run ingestion commands with local recipes
   datahub-actions:
     image: acryldata/datahub-actions:head
@@ -402,10 +426,10 @@ services:
       - DATAHUB_GMS_URL=http://datahub-gms:8080
     volumes:
       - ../datahub/recipes:/etc/datahub/recipes:ro
-    command: ["sleep", "infinity"]
+    command: [ "sleep", "infinity" ]
     networks:
       - datamlops-network
-    
+
 networks:
   datamlops-network:
     driver: bridge
