@@ -129,7 +129,7 @@ def _get_mlflow_client():
 def _fetch_ohlcv_from_mongo(
     symbol: str, interval: str, limit: int
 ) -> Optional[pd.DataFrame]:
-    """Fetches OHLCV data from MongoDB."""
+    """Fetches OHLCV data from MongoDB (core columns only)."""
     client = _get_mongodb_client()
     if client is None:
         return None
@@ -138,8 +138,14 @@ def _fetch_ohlcv_from_mongo(
         db = client["cryptomarket"]
         collection = db["ohlcv"]
 
+        # Project only core OHLCV columns to avoid NaN contamination
+        projection = {
+            "_id": 0, "symbol": 1, "interval": 1, "timestamp": 1,
+            "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1,
+        }
         cursor = collection.find(
             {"symbol": symbol.upper(), "interval": interval},
+            projection,
             sort=[("timestamp", -1)],
         ).limit(limit)
 
@@ -148,6 +154,8 @@ def _fetch_ohlcv_from_mongo(
             return None
 
         df = pd.DataFrame(records)
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.sort_values("timestamp").reset_index(drop=True)
         return df
     except Exception as e:
@@ -157,7 +165,7 @@ def _fetch_ohlcv_from_mongo(
         client.close()
 
 
-def _generate_synthetic_ohlcv(symbol: str, n: int = 200) -> pd.DataFrame:
+def _generate_synthetic_ohlcv(symbol: str, n: int = 500) -> pd.DataFrame:
     """Generates synthetic OHLCV data for demo/testing when MongoDB is unavailable."""
     np.random.seed(42)
     timestamps = pd.date_range("2024-02-01", periods=n, freq="1min")
@@ -244,6 +252,8 @@ async def predict(request: PredictRequest):
     try:
         fe = CryptoFeatureEngineer()
         df = fe.build_feature_matrix_from_dataframe(df, dropna=True)
+        # Replace inf values that can appear in ratios/returns
+        df = df.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
         feature_names = fe.get_feature_names(df)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Feature engineering failed: {e}")
@@ -300,6 +310,8 @@ async def detect_anomalies(request: AnomalyRequest):
     try:
         fe = CryptoFeatureEngineer()
         df = fe.build_feature_matrix_from_dataframe(df, dropna=True)
+        # Replace inf values that can appear in ratios/returns
+        df = df.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
         feature_names = fe.get_feature_names(df)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Feature engineering failed: {e}")
