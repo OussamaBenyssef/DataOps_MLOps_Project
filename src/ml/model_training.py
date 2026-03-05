@@ -376,11 +376,19 @@ class CryptoPricePredictor:
                 # Log metrics
                 mlflow.log_metrics(metrics)
 
-                # Log model
-                if model_type == "xgboost":
-                    mlflow.xgboost.log_model(model, "model")
-                elif model_type == "lstm":
-                    mlflow.keras.log_model(model, "model")
+                # Log model (with fallback for SDK/server version mismatch)
+                try:
+                    if model_type == "xgboost":
+                        mlflow.xgboost.log_model(model, "model")
+                    elif model_type == "lstm":
+                        mlflow.keras.log_model(model, "model")
+                except Exception as model_err:
+                    logger.warning(f"Native log_model failed ({model_err}), using joblib fallback")
+                    import tempfile, joblib as _joblib
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        path = f"{tmpdir}/{model_type}_model.joblib"
+                        _joblib.dump(model, path)
+                        mlflow.log_artifact(path, "model")
 
                 # Log feature names
                 if feature_names:
