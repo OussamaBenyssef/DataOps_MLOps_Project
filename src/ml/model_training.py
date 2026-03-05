@@ -174,7 +174,6 @@ class CryptoPricePredictor:
             "learning_rate": 0.1,
             "objective": "binary:logistic",
             "eval_metric": "logloss",
-            "use_label_encoder": False,
             "random_state": self.random_state,
             "n_jobs": -1,
         }
