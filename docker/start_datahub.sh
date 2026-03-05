@@ -83,6 +83,11 @@ echo "docker exec -it datahub-actions datahub ingest -c /etc/datahub/recipes/kaf
 
 echo ""
 
+echo "Emission du lineage (P5) :"
+echo "DATAHUB_GMS_URL=http://localhost:8082 python -m src.lineage.emit_lineage"
+
+echo ""
+
 if docker exec datahub-actions sh -lc 'command -v datahub >/dev/null 2>&1'; then
   echo "DataHub CLI est disponible dans datahub-actions."
 else
