@@ -196,11 +196,29 @@ class TestDAGLoading:
         assert dag.dag_id == "crypto_daily_pipeline"
         assert dag.schedule_interval == "@daily"
         task_ids = [t.task_id for t in dag.tasks]
+        # Pipeline principal (5 tâches)
         assert "check_services" in task_ids
         assert "collect_historical_data" in task_ids
         assert "trigger_spark_etl" in task_ids
         assert "compute_quality_metrics" in task_ids
         assert "log_pipeline_summary" in task_ids
+        # DataHub ingestion + lineage (3 tâches)
+        assert "ingest_datahub_kafka" in task_ids
+        assert "ingest_datahub_mongodb" in task_ids
+        assert "emit_datahub_lineage" in task_ids
+
+    def test_daily_pipeline_has_8_tasks(self):
+        """Le DAG crypto_daily_pipeline contient exactement 8 tâches."""
+        from dags.crypto_daily_pipeline import dag
+        assert len(dag.tasks) == 8, (
+            f"Attendu 8 tâches, trouvé {len(dag.tasks)}: "
+            f"{[t.task_id for t in dag.tasks]}"
+        )
+
+    def test_daily_pipeline_datahub_tags(self):
+        """Le DAG a le tag 'datahub'."""
+        from dags.crypto_daily_pipeline import dag
+        assert "datahub" in dag._kwargs.get("tags", [])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
