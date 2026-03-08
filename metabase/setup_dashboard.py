@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Metabase Dashboard Setup — P5 (Visualisation)
+Metabase Dashboard Setup — (Visualisation) 
 ==============================================
 Script d'auto-configuration du dashboard Metabase via l'API REST.
 Crée la connexion MongoDB, les questions (visualisations), et le dashboard.
@@ -45,6 +45,28 @@ DASHBOARD_NAME = "🚀 Crypto Market Overview"
 DASHBOARD_DESCRIPTION = (
     "Dashboard temps réel du marché crypto : prix, volumes, indicateurs techniques, "
     "et détection d'anomalies. Données issues du pipeline DataOps/MLOps."
+)
+
+
+# Noms des dashboards 
+DATAOPS_DASHBOARD_NAME = "Dashboard Métriques DataOps"
+DATAOPS_DASHBOARD_DESCRIPTION = (
+    "Suivi de la qualité et de la fraîcheur des données: volumétrie, couverture, "
+    "dispersion des prix et répartition des anomalies."
+)
+
+# Dashboard dédié au suivi opérationnel des modèles ML.
+ML_DASHBOARD_NAME = "Dashboard Performance ML"
+ML_DASHBOARD_DESCRIPTION = (
+    "Suivi des sorties modèles: distribution des prédictions, score de confiance "
+    "et taux d'anomalies par symbole."
+)
+
+# Dashboard crypto global demandé dans la tâche 6. 
+CRYPTO_DASHBOARD_NAME = "Dashboard Crypto Metabase"
+CRYPTO_DASHBOARD_DESCRIPTION = (
+    "Vue marché crypto: prix, volumes et anomalies détectées sur les données "
+    "ingérées dans MongoDB."
 )
 
 
@@ -583,12 +605,291 @@ def get_questions_config():
         },
     ]
 
+def get_dataops_questions_config():
+    """Construit les cartes du dashboard de métriques DataOps (tâche 4)."""
+    return [
+        {
+            # Carte de volumétrie des enregistrements agrégés par symbole.
+            "name": "DataOps - Volumétrie par symbole",
+            "description": "Nombre de fenêtres agrégées calculées par symbole et intervalle",
+            "collection": "aggregated_metrics",
+            "pipeline": [
+                {"$group": {
+                    "_id": {"symbol": "$symbol", "interval": "$interval"},
+                    "nb_fenetres": {"$sum": 1},
+                }},
+                {"$project": {
+                    "symbol": "$_id.symbol",
+                    "interval": "$_id.interval",
+                    "nb_fenetres": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"nb_fenetres": -1}},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["symbol"],
+                "graph.metrics": ["nb_fenetres"],
+            },
+            "row": 0, "col": 0, "size_x": 8, "size_y": 5,
+        },
+        {
+            # Carte de fraîcheur pour suivre le dernier timestamp ingéré.
+            "name": "DataOps - Fraîcheur des données",
+            "description": "Dernier timestamp et ancienneté des données par symbole",
+            "collection": "ohlcv",
+            "pipeline": [
+                {"$group": {
+                    "_id": "$symbol",
+                    "dernier_point": {"$max": "$timestamp"},
+                    "lignes": {"$sum": 1},
+                }},
+                {"$project": {
+                    "symbol": "$_id",
+                    "dernier_point": 1,
+                    "lignes": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"dernier_point": -1}},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "symbol", "enabled": True},
+                    {"name": "dernier_point", "enabled": True},
+                    {"name": "lignes", "enabled": True},
+                ],
+            },
+            "row": 0, "col": 8, "size_x": 10, "size_y": 5,
+        },
+        {
+            # Carte de dispersion prix pour suivre la variabilité de marché.
+            "name": "DataOps - Volatilité moyenne",
+            "description": "Volatilité moyenne agrégée par symbole",
+            "collection": "aggregated_metrics",
+            "pipeline": [
+                {"$group": {
+                    "_id": "$symbol",
+                    "volatilite_moyenne": {"$avg": "$price_volatility"},
+                    "plage_prix_moyenne": {"$avg": "$price_range_pct"},
+                }},
+                {"$project": {
+                    "symbol": "$_id",
+                    "volatilite_moyenne": {"$round": ["$volatilite_moyenne", 6]},
+                    "plage_prix_moyenne": {"$round": ["$plage_prix_moyenne", 4]},
+                    "_id": 0,
+                }},
+                {"$sort": {"volatilite_moyenne": -1}},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["symbol"],
+                "graph.metrics": ["volatilite_moyenne"],
+            },
+            "row": 5, "col": 0, "size_x": 9, "size_y": 5,
+        },
+        {
+            # Carte de qualité orientée incidents/anomalies détectées.
+            "name": "DataOps - Taux d'anomalies",
+            "description": "Nombre d'anomalies détectées par symbole",
+            "collection": "anomalies",
+            "pipeline": [
+                {"$group": {
+                    "_id": "$symbol",
+                    "nb_anomalies": {"$sum": 1},
+                }},
+                {"$project": {
+                    "symbol": "$_id",
+                    "nb_anomalies": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"nb_anomalies": -1}},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["symbol"],
+                "graph.metrics": ["nb_anomalies"],
+            },
+            "row": 5, "col": 9, "size_x": 9, "size_y": 5,
+        },
+    ]
+
+
+def get_ml_performance_questions_config():
+    """Construit les cartes du dashboard Performance ML (tâche 5)."""
+    return [
+        {
+            # Carte de distribution des classes prédites par modèle.
+            "name": "ML - Distribution des prédictions",
+            "description": "Nombre de prédictions UP/DOWN par symbole",
+            "collection": "predictions",
+            "pipeline": [
+                {"$group": {
+                    "_id": {"symbol": "$symbol", "prediction": "$prediction"},
+                    "total": {"$sum": 1},
+                }},
+                {"$project": {
+                    "symbol": "$_id.symbol",
+                    "prediction": "$_id.prediction",
+                    "total": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"total": -1}},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["prediction"],
+                "graph.metrics": ["total"],
+            },
+            "row": 0, "col": 0, "size_x": 8, "size_y": 5,
+        },
+        {
+            # Carte de confiance moyenne des scores produits par le modèle.
+            "name": "ML - Confiance moyenne",
+            "description": "Moyenne des probabilités de prédiction par symbole",
+            "collection": "predictions",
+            "pipeline": [
+                {"$match": {"prediction_probability": {"$ne": None}}},
+                {"$group": {
+                    "_id": "$symbol",
+                    "confiance_moyenne": {"$avg": "$prediction_probability"},
+                    "nb_predictions": {"$sum": 1},
+                }},
+                {"$project": {
+                    "symbol": "$_id",
+                    "confiance_moyenne": {"$round": ["$confiance_moyenne", 4]},
+                    "nb_predictions": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"confiance_moyenne": -1}},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["symbol"],
+                "graph.metrics": ["confiance_moyenne"],
+            },
+            "row": 0, "col": 8, "size_x": 10, "size_y": 5,
+        },
+        {
+            # Carte de rythme de production des prédictions dans le temps.
+            "name": "ML - Débit des prédictions",
+            "description": "Nombre de prédictions produites par heure",
+            "collection": "predictions",
+            "pipeline": [
+                {"$project": {
+                    "prediction_hour": {"$dateTrunc": {"date": "$created_at", "unit": "hour"}},
+                    "_id": 0,
+                }},
+                {"$group": {
+                    "_id": "$prediction_hour",
+                    "nb_predictions": {"$sum": 1},
+                }},
+                {"$project": {
+                    "prediction_hour": "$_id",
+                    "nb_predictions": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"prediction_hour": 1}},
+            ],
+            "display": "line",
+            "viz_settings": {
+                "graph.dimensions": ["prediction_hour"],
+                "graph.metrics": ["nb_predictions"],
+            },
+            "row": 5, "col": 0, "size_x": 9, "size_y": 5,
+        },
+        {
+            # Carte de corrélation simple entre prédictions et anomalies observées.
+            "name": "ML - Anomalies par symbole",
+            "description": "Nombre d'anomalies détectées pour contextualiser les performances ML",
+            "collection": "anomalies",
+            "pipeline": [
+                {"$group": {
+                    "_id": "$symbol",
+                    "nb_anomalies": {"$sum": 1},
+                }},
+                {"$project": {
+                    "symbol": "$_id",
+                    "nb_anomalies": 1,
+                    "_id": 0,
+                }},
+                {"$sort": {"nb_anomalies": -1}},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "symbol", "enabled": True},
+                    {"name": "nb_anomalies", "enabled": True},
+                ],
+            },
+            "row": 5, "col": 9, "size_x": 9, "size_y": 5,
+        },
+    ]
+
+
+def build_dashboard_bundle():
+    """Assemble la liste des dashboards à provisionner dans Metabase.""" 
+    return [
+        {
+            "name": DATAOPS_DASHBOARD_NAME,
+            "description": DATAOPS_DASHBOARD_DESCRIPTION,
+            "questions": get_dataops_questions_config(),
+        },
+        {
+            "name": ML_DASHBOARD_NAME,
+            "description": ML_DASHBOARD_DESCRIPTION,
+            "questions": get_ml_performance_questions_config(),
+        },
+        {
+            "name": CRYPTO_DASHBOARD_NAME,
+            "description": CRYPTO_DASHBOARD_DESCRIPTION,
+            "questions": get_questions_config(),
+        },
+    ]
+
+
+def create_dashboard_from_config(client, db_id, dashboard_config):
+    """Crée un dashboard complet à partir d'une configuration déclarative."""
+    logger.info("")
+    logger.info("─" * 40)
+    logger.info(f"📋 DASHBOARD: {dashboard_config['name']}")
+    logger.info("─" * 40)
+
+    # Création des questions du dashboard courant.
+    card_ids = []
+    for question in dashboard_config["questions"]:
+        card_id = client.create_native_question(
+            name=question["name"],
+            description=question["description"], 
+            db_id=db_id,
+            collection=question["collection"],
+            pipeline=question["pipeline"],
+            display=question["display"],
+            viz_settings=question.get("viz_settings"),
+        )
+        card_ids.append({
+            "card_id": card_id,
+            "row": question["row"],
+            "col": question["col"],
+            "size_x": question["size_x"],
+            "size_y": question["size_y"],
+        })
+
+    # Création du dashboard puis association des cartes.
+    dash_id = client.create_dashboard(dashboard_config["name"], dashboard_config["description"])
+    if not dash_id:
+        logger.error(f"Impossible de créer le dashboard: {dashboard_config['name']}")
+        return None, card_ids
+
+    client.add_cards_to_dashboard(dash_id, card_ids)
+    return dash_id, card_ids
+
 
 # ─────────────────────── MAIN ────────────────────────────────────────────
 
 def main():
     logger.info("=" * 60)
-    logger.info("🚀 METABASE DASHBOARD SETUP — P5")
+    logger.info("🚀 METABASE DASHBOARD SETUP") 
     logger.info("=" * 60)
 
     client = MetabaseClient(METABASE_URL)
@@ -623,55 +924,33 @@ def main():
         logger.error("Impossible d'ajouter MongoDB — abandon")
         sys.exit(1)
 
-    # 6. Créer les questions
-    logger.info("")
-    logger.info("─" * 40)
-    logger.info("❓ CRÉATION DES QUESTIONS")
-    logger.info("─" * 40)
-    questions_config = get_questions_config()
-    card_ids = []
-    for q in questions_config:
-        card_id = client.create_native_question(
-            name=q["name"],
-            description=q["description"],
-            db_id=db_id,
-            collection=q["collection"],
-            pipeline=q["pipeline"],
-            display=q["display"],
-            viz_settings=q.get("viz_settings"),
-        )
-        card_ids.append({
-            "card_id": card_id,
-            "row": q["row"],
-            "col": q["col"],
-            "size_x": q["size_x"],
-            "size_y": q["size_y"],
-        })
-
-    # 7. Créer le dashboard
+    # 6. Créer les dashboards P5 (DataOps, Performance ML, Crypto).
     logger.info("")
     logger.info("─" * 40)
     logger.info("📋 CRÉATION DU DASHBOARD")
     logger.info("─" * 40)
-    dash_id = client.create_dashboard(DASHBOARD_NAME, DASHBOARD_DESCRIPTION)
-    if not dash_id:
-        logger.error("Impossible de créer le dashboard — abandon")
-        sys.exit(1)
+     dashboards_created = []
+    cards_created = 0
+    cards_total = 0
+    for dashboard in build_dashboard_bundle():
+      dash_id, card_ids = create_dashboard_from_config(client, db_id, dashboard)
+      dashboards_created.append({"name": dashboard["name"], "id": dash_id})
+      cards_created += sum(1 for card in card_ids if card["card_id"])
+      cards_total += len(card_ids)
 
-    # 8. Ajouter les cartes au dashboard (en une seule requête PUT)
-    client.add_cards_to_dashboard(dash_id, card_ids)
 
-    # 9. Résumé
+    # 7. Résumé
     logger.info("")
     logger.info("=" * 60)
     logger.info("✅ DASHBOARD CONFIGURÉ AVEC SUCCÈS")
     logger.info("=" * 60)
-    logger.info(f"📊 Dashboard: {METABASE_URL}/dashboard/{dash_id}")
+    for dashboard_info in dashboards_created:
+      logger.info(f"📊 Dashboard {dashboard_info['name']}: {METABASE_URL}/dashboard/{dashboard_info['id']}")
     logger.info(f"🔗 Metabase UI: {METABASE_URL}")
     logger.info(f"👤 Login: {METABASE_EMAIL}")
     logger.info(f"🔑 Password: {METABASE_PASSWORD}")
     logger.info(f"📦 Base de données: MongoDB (id={db_id})")
-    logger.info(f"❓ Questions créées: {sum(1 for c in card_ids if c['card_id'])}/{len(card_ids)}")
+    logger.info(f"❓ Questions créées: {cards_created}/{cards_total}")
     logger.info("=" * 60)
 
 
