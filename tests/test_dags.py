@@ -104,6 +104,7 @@ _airflow_mock.DAG = FakeDAG
 _airflow_models_param.Param = FakeParam
 _airflow_operators_python.PythonOperator = FakeOperator
 _airflow_operators_python.BranchPythonOperator = FakeOperator
+_airflow_operators_python.ShortCircuitOperator = FakeOperator
 _airflow_operators_bash.BashOperator = FakeOperator
 _airflow_operators.python = _airflow_operators_python
 _airflow_operators.bash = _airflow_operators_bash
@@ -675,6 +676,156 @@ class TestDailyPipelineDAG:
         assert "RÉSUMÉ PIPELINE" in report
         assert "BTCUSDT" in report
         assert "2880" in report
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TEST 5: ML Training DAG — task functions
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestMLTrainingDAG:
+    """Tests des fonctions tâches du DAG crypto_ml_training."""
+
+    def test_ml_training_dag_loads(self):
+        """Le DAG crypto_ml_training se charge et a les bons task_ids."""
+        from dags.crypto_ml_training import dag
+        assert dag.dag_id == "crypto_ml_training"
+        assert dag.schedule_interval == "@daily"
+        task_ids = [t.task_id for t in dag.tasks]
+        assert "check_new_data" in task_ids
+        assert "train_price_predictor" in task_ids
+        assert "train_anomaly_detector" in task_ids
+        assert "run_drift_detection" in task_ids
+        assert "register_models" in task_ids
+        assert "update_training_marker" in task_ids
+        assert "log_training_summary" in task_ids
+        assert len(dag.tasks) == 7
+
+    @patch("pymongo.MongoClient")
+    def test_check_new_data_enough(self, mock_mongo_cls):
+        """check_new_data retourne True si assez de nouvelles données."""
+        from dags.crypto_ml_training import check_new_data
+
+        # Mock ml_metadata — dernier training il y a 1 jour
+        mock_metadata = {
+            "_id": "last_training",
+            "timestamp": datetime(2024, 2, 14, tzinfo=timezone.utc),
+        }
+        mock_ohlcv = MagicMock()
+        mock_ohlcv.count_documents.return_value = 500  # Par symbole
+        mock_ml_meta = MagicMock()
+        mock_ml_meta.find_one.return_value = mock_metadata
+
+        def getitem(name):
+            if name == "ml_metadata":
+                return mock_ml_meta
+            return mock_ohlcv
+
+        mock_db = MagicMock()
+        mock_db.__getitem__ = MagicMock(side_effect=getitem)
+        mock_client = MagicMock()
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_mongo_cls.return_value = mock_client
+
+        ctx = make_mock_context()
+        result = check_new_data(**ctx)
+
+        assert result is True
+        assert ctx["_xcom_store"]["total_new"] == 1500  # 500 × 3 paires
+
+    @patch("pymongo.MongoClient")
+    def test_check_new_data_not_enough(self, mock_mongo_cls):
+        """check_new_data retourne False si pas assez de nouvelles données."""
+        from dags.crypto_ml_training import check_new_data
+
+        mock_metadata = {
+            "_id": "last_training",
+            "timestamp": datetime(2024, 2, 14, tzinfo=timezone.utc),
+        }
+        mock_ohlcv = MagicMock()
+        mock_ohlcv.count_documents.return_value = 50  # Trop peu
+        mock_ml_meta = MagicMock()
+        mock_ml_meta.find_one.return_value = mock_metadata
+
+        def getitem(name):
+            if name == "ml_metadata":
+                return mock_ml_meta
+            return mock_ohlcv
+
+        mock_db = MagicMock()
+        mock_db.__getitem__ = MagicMock(side_effect=getitem)
+        mock_client = MagicMock()
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_mongo_cls.return_value = mock_client
+
+        ctx = make_mock_context()
+        result = check_new_data(**ctx)
+
+        assert result is False
+        assert ctx["_xcom_store"]["total_new"] == 150  # 50 × 3
+
+    @patch("pymongo.MongoClient")
+    def test_check_new_data_first_run(self, mock_mongo_cls):
+        """Premier run (pas de marqueur) → tout est considéré comme nouveau."""
+        from dags.crypto_ml_training import check_new_data
+
+        mock_ohlcv = MagicMock()
+        mock_ohlcv.count_documents.return_value = 2000
+        mock_ml_meta = MagicMock()
+        mock_ml_meta.find_one.return_value = None  # Pas de marqueur
+
+        def getitem(name):
+            if name == "ml_metadata":
+                return mock_ml_meta
+            return mock_ohlcv
+
+        mock_db = MagicMock()
+        mock_db.__getitem__ = MagicMock(side_effect=getitem)
+        mock_client = MagicMock()
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_mongo_cls.return_value = mock_client
+
+        ctx = make_mock_context()
+        result = check_new_data(**ctx)
+
+        assert result is True
+
+    @patch("pymongo.MongoClient")
+    def test_update_training_marker(self, mock_mongo_cls):
+        """update_training_marker écrit dans ml_metadata."""
+        from dags.crypto_ml_training import update_training_marker
+
+        mock_ml_meta = MagicMock()
+        mock_db = MagicMock()
+        mock_db.__getitem__ = MagicMock(return_value=mock_ml_meta)
+        mock_client = MagicMock()
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_mongo_cls.return_value = mock_client
+
+        ctx = make_mock_context()
+        ctx["_xcom_store"]["total_new"] = 1500
+        ctx["_xcom_store"]["total_all"] = 10000
+
+        update_training_marker(**ctx)
+
+        mock_ml_meta.update_one.assert_called_once()
+        assert "training_timestamp" in ctx["_xcom_store"]
+
+    def test_log_training_summary_format(self):
+        """log_training_summary génère un résumé lisible."""
+        from dags.crypto_ml_training import log_training_summary
+
+        ctx = make_mock_context()
+        ctx["_xcom_store"]["new_data_stats"] = {"BTCUSDT": 500, "ETHUSDT": 400, "BNBUSDT": 300}
+        ctx["_xcom_store"]["total_new"] = 1200
+        ctx["_xcom_store"]["total_all"] = 10000
+        ctx["_xcom_store"]["training_timestamp"] = "2024-02-15T12:00:00"
+
+        report = log_training_summary(**ctx)
+
+        assert "RÉSUMÉ PIPELINE ML TRAINING" in report
+        assert "BTCUSDT" in report
+        assert "1200" in report
+        assert "XGBoost" in report
 
 
 if __name__ == "__main__":
