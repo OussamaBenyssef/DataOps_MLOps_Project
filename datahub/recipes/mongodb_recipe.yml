@@ -7,6 +7,24 @@ source:
     database_pattern:
       allow:
         - "cryptomarket"
+     # Filtre des collections pour ingérer uniquement les objets utiles.
+    collection_pattern:
+      # Autorise uniquement les collections produites/consommées par les pipelines.
+      allow:
+        - "raw_trades"
+        - "ohlcv"
+        - "indicators"
+        - "aggregated_metrics"
+        - "anomalies"
+        
+    # Active le profiling pour publier des stats de colonnes dans DataHub.
+    profiling:
+      enabled: true
+
+    # Active la suppression des métadonnées obsolètes côté catalogue.
+    stateful_ingestion:
+      enabled: true
+      remove_stale_metadata: true
 
 sink:
   type: datahub-rest
