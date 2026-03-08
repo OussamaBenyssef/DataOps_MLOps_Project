@@ -14,11 +14,12 @@ Usage:
     DATAHUB_GMS_URL=http://datahub-gms:8080 python -m src.lineage.emit_lineage
 """
 
+from __future__ import annotations
 import logging
-import sys
 import os
+import sys
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 # DataHub SDK imports
 try:
@@ -33,6 +34,13 @@ try:
     )
     DATAHUB_AVAILABLE = True
 except ImportError:
+    # Fallbacks de typage pour éviter une erreur au chargement du module.
+    builder = None
+    MetadataChangeProposalWrapper = Any
+    DatahubRestEmitter = Any
+    UpstreamClass = Any
+    UpstreamLineageClass = Any
+    DatasetPropertiesClass = Any
     DATAHUB_AVAILABLE = False
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
