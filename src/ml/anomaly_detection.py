@@ -359,9 +359,25 @@ class CryptoAnomalyDetector:
                 mlflow.log_metrics(numeric_metrics)
 
                 if model_type == "isolation_forest":
-                    mlflow.sklearn.log_model(model, "model")
+                    try:
+                        mlflow.sklearn.log_model(model, "model")
+                    except Exception as model_err:
+                        logger.warning(f"Native log_model failed ({model_err}), using joblib fallback")
+                        import tempfile, joblib as _joblib
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            path = f"{tmpdir}/{model_type}_model.joblib"
+                            _joblib.dump(model, path)
+                            mlflow.log_artifact(path, "model")
                 elif model_type == "autoencoder":
-                    mlflow.keras.log_model(model, "model")
+                    try:
+                        mlflow.keras.log_model(model, "model")
+                    except Exception as model_err:
+                        logger.warning(f"Native log_model failed ({model_err}), using joblib fallback")
+                        import tempfile, joblib as _joblib
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            path = f"{tmpdir}/{model_type}_model.joblib"
+                            _joblib.dump(model, path)
+                            mlflow.log_artifact(path, "model")
 
                 if feature_names:
                     mlflow.log_text(

@@ -7,6 +7,7 @@ Orchestre le pipeline quotidien de données crypto :
   3. ETL batch Spark (cleaning + indicateurs + MongoDB)
   4. Calcul métriques qualité
   5. Résumé pipeline
+  6. Ingestion métadonnées + lineage → DataHub
 
 Schedule: @daily
 """
@@ -304,11 +305,11 @@ import json
 with DAG(
     dag_id="crypto_daily_pipeline",
     default_args=default_args,
-    description="Pipeline quotidien: collecte historique Binance → ETL Spark → métriques qualité",
+    description="Pipeline quotidien: collecte historique Binance → ETL Spark → métriques qualité → DataHub",
     schedule_interval="@daily",
     catchup=False,
     max_active_runs=1,
-    tags=["crypto", "pipeline", "P1", "daily"],
+    tags=["crypto", "pipeline", "P1", "daily", "datahub"],
 ) as dag:
 
     # Tâche 1: Vérification des services
@@ -358,5 +359,39 @@ with DAG(
         provide_context=True,
     )
 
+    # Tâche 6a: Ingestion métadonnées Kafka → DataHub
+    t_datahub_kafka = BashOperator(
+        task_id="ingest_datahub_kafka",
+        bash_command=(
+            "docker exec datahub-actions "
+            "datahub ingest -c /etc/datahub/recipes/kafka_recipe.yml"
+        ),
+        execution_timeout=timedelta(minutes=10),
+    )
+
+    # Tâche 6b: Ingestion métadonnées MongoDB → DataHub
+    t_datahub_mongodb = BashOperator(
+        task_id="ingest_datahub_mongodb",
+        bash_command=(
+            "docker exec datahub-actions "
+            "datahub ingest -c /etc/datahub/recipes/mongodb_recipe.yml"
+        ),
+        execution_timeout=timedelta(minutes=10),
+    )
+
+    # Tâche 6c: Émission du lineage données → DataHub
+    t_datahub_lineage = BashOperator(
+        task_id="emit_datahub_lineage",
+        bash_command=(
+            "docker exec "
+            "-e DATAHUB_GMS_URL=http://datahub-gms:8080 "
+            "datahub-actions python3 /tmp/emit_all.py"
+        ),
+        execution_timeout=timedelta(minutes=30),
+    )
+
     # Définition du flux
+    #   Pipeline principal: check → collect → spark_etl → metrics → summary
+    #   Puis DataHub en parallèle: kafka + mongodb → lineage
     t_check >> t_collect >> t_spark_etl >> t_metrics >> t_summary
+    t_summary >> [t_datahub_kafka, t_datahub_mongodb] >> t_datahub_lineage
