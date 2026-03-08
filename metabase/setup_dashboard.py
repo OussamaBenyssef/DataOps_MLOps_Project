@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 METABASE_URL = "http://localhost:3000"
 METABASE_EMAIL = "admin@crypto.local"
 METABASE_PASSWORD = "DataMLOps2024!"
-METABASE_FIRST_NAME = "Admin"
-METABASE_LAST_NAME = "Crypto"
+METABASE_FIRST_NAME = "Oussama"
+METABASE_LAST_NAME = "Benyssef"
 
 MONGODB_HOST = "mongodb"
 MONGODB_PORT = 27017
@@ -51,7 +51,7 @@ DASHBOARD_DESCRIPTION = (
 # ─────────────────────── HELPERS ─────────────────────────────────────────
 
 class MetabaseClient:
-    """Client minimal pour l'API REST Metabase."""
+    """Client minimal pour l'API REST Metabase (compatible v0.48+)."""
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
@@ -79,6 +79,9 @@ class MetabaseClient:
     def put(self, path, data=None):
         return self._request("PUT", path, json=data)
 
+    def delete(self, path):
+        return self._request("DELETE", path)
+
     # ── Auth ──
 
     def wait_for_metabase(self, timeout=120):
@@ -99,7 +102,6 @@ class MetabaseClient:
 
     def setup_initial(self):
         """Premier setup de Metabase (création admin + skip onboarding)."""
-        # Vérifier si le setup est déjà fait
         resp = self.get("/session/properties")
         if resp.status_code == 200:
             props = resp.json()
@@ -153,7 +155,6 @@ class MetabaseClient:
 
     def add_mongodb_database(self):
         """Ajoute MongoDB comme source de données."""
-        # Vérifier si la base existe déjà
         resp = self.get("/database")
         if resp.status_code == 200:
             for db in resp.json().get("data", []):
@@ -182,7 +183,6 @@ class MetabaseClient:
         if resp.status_code in (200, 201):
             db_id = resp.json().get("id")
             logger.info(f"✅ MongoDB ajouté (id={db_id})")
-            # Lancer le sync
             self.post(f"/database/{db_id}/sync_schema")
             logger.info("🔄 Sync du schéma lancé — attente 10s...")
             time.sleep(10)
@@ -192,8 +192,22 @@ class MetabaseClient:
 
     # ── Questions (Saved Questions) ──
 
+    def _find_existing_card(self, name):
+        """Cherche une question existante par nom."""
+        resp = self.get("/card")
+        if resp.status_code == 200:
+            for card in resp.json():
+                if card.get("name") == name:
+                    return card.get("id")
+        return None
+
     def create_native_question(self, name, description, db_id, collection, pipeline, display="table", viz_settings=None):
-        """Crée une question MongoDB native (aggregation pipeline)."""
+        """Crée une question MongoDB native (idempotent — skip si existe)."""
+        existing_id = self._find_existing_card(name)
+        if existing_id:
+            logger.info(f"  ℹ️  Question '{name}' existe déjà (id={existing_id})")
+            return existing_id
+
         question_data = {
             "name": name,
             "description": description,
@@ -218,15 +232,30 @@ class MetabaseClient:
 
     # ── Dashboard ──
 
+    def _find_existing_dashboard(self, name):
+        """Cherche un dashboard existant par nom (compatible v0.48+)."""
+        # Méthode 1 : recherche via collection root items
+        resp = self.get("/collection/root/items?models=dashboard")
+        if resp.status_code == 200:
+            data = resp.json()
+            items = data.get("data", data) if isinstance(data, dict) else data
+            for item in items:
+                if item.get("name") == name:
+                    return item.get("id")
+        # Méthode 2 : recherche via /search
+        resp = self.get(f"/search?q={name}&models=dashboard")
+        if resp.status_code == 200:
+            for item in resp.json().get("data", []):
+                if item.get("name") == name:
+                    return item.get("id")
+        return None
+
     def create_dashboard(self, name, description):
         """Crée un dashboard vide."""
-        # Vérifier si le dashboard existe déjà
-        resp = self.get("/dashboard")
-        if resp.status_code == 200:
-            for d in resp.json():
-                if d.get("name") == name:
-                    logger.info(f"ℹ️  Dashboard '{name}' existe déjà (id={d['id']})")
-                    return d["id"]
+        existing_id = self._find_existing_dashboard(name)
+        if existing_id:
+            logger.info(f"ℹ️  Dashboard '{name}' existe déjà (id={existing_id})")
+            return existing_id
 
         resp = self.post("/dashboard", data={
             "name": name,
@@ -239,33 +268,128 @@ class MetabaseClient:
         logger.error(f"❌ Erreur dashboard: {resp.text[:200]}")
         return None
 
-    def add_card_to_dashboard(self, dashboard_id, card_id, row, col, size_x=6, size_y=4):
-        """Ajoute une carte (question) à un dashboard."""
-        resp = self.post(f"/dashboard/{dashboard_id}/cards", data={
-            "cardId": card_id,
+    def add_cards_to_dashboard(self, dashboard_id, cards_info):
+        """Ajoute toutes les cartes au dashboard via PUT /dashboard/:id (v0.48+).
+
+        Utilise le champ 'dashcards' (Metabase v0.48).
+        Les cartes avec un id négatif sont traitées comme de nouvelles cartes.
+        """
+        # Récupérer les dashcards existantes pour ne pas les écraser
+        resp = self.get(f"/dashboard/{dashboard_id}")
+        existing_dashcards = []
+        if resp.status_code == 200:
+            existing_dashcards = resp.json().get("dashcards", [])
+
+        # Construire les nouvelles dashcards
+        new_dashcards = []
+        next_negative_id = -1
+        for card in cards_info:
+            if card["card_id"] is None:
+                continue
+            # Vérifier si ce card_id est déjà dans le dashboard
+            already_present = any(
+                dc.get("card_id") == card["card_id"]
+                for dc in existing_dashcards
+            )
+            if already_present:
+                continue
+            new_dashcards.append({
+                "id": next_negative_id,
+                "card_id": card["card_id"],
+                "row": card["row"],
+                "col": card["col"],
+                "size_x": card["size_x"],
+                "size_y": card["size_y"],
+                "parameter_mappings": [],
+                "visualization_settings": {},
+            })
+            next_negative_id -= 1
+
+        if not new_dashcards and not existing_dashcards:
+            logger.warning("⚠️  Aucune carte valide à ajouter")
+            return False
+
+        if not new_dashcards:
+            logger.info(f"  ℹ️  Toutes les cartes sont déjà dans le dashboard")
+            return True
+
+        # Combiner existantes + nouvelles
+        all_dashcards = existing_dashcards + new_dashcards
+
+        resp = self.put(f"/dashboard/{dashboard_id}", data={
+            "dashcards": all_dashcards,
         })
         if resp.status_code in (200, 201):
-            dashcard = resp.json()
-            dashcard_id = dashcard.get("id")
-            # Positionner la carte
-            self.put(f"/dashboard/{dashboard_id}/cards", data={
-                "cards": [{
-                    "id": dashcard_id,
-                    "card_id": card_id,
-                    "row": row,
-                    "col": col,
-                    "size_x": size_x,
-                    "size_y": size_y,
-                }],
-            })
-            return dashcard_id
-        return None
+            result_cards = resp.json().get("dashcards", [])
+            logger.info(f"  ✅ {len(new_dashcards)} cartes ajoutées au dashboard ({len(result_cards)} total)")
+            return True
+
+        logger.error(f"  ❌ Impossible d'ajouter les cartes: {resp.status_code}: {resp.text[:300]}")
+        return False
+
+    # ── Cleanup ──
+
+    def cleanup_old_resources(self):
+        """Supprime les anciennes questions et dashboards dupliqués."""
+        logger.info("🧹 Nettoyage des ressources dupliquées...")
+
+        # Trouver et supprimer les questions dupliquées (garder les plus récentes)
+        resp = self.get("/card")
+        if resp.status_code == 200:
+            cards = resp.json()
+            # Grouper par nom
+            by_name = {}
+            for card in cards:
+                name = card.get("name", "")
+                by_name.setdefault(name, []).append(card)
+
+            deleted = 0
+            for name, group in by_name.items():
+                if len(group) > 1:
+                    # Garder le plus récent, supprimer les autres
+                    group.sort(key=lambda c: c.get("id", 0), reverse=True)
+                    for old_card in group[1:]:
+                        self.delete(f"/card/{old_card['id']}")
+                        deleted += 1
+
+            if deleted:
+                logger.info(f"  🗑️  {deleted} questions dupliquées supprimées")
+            else:
+                logger.info(f"  ✅ Aucun doublon trouvé")
+
+        # Trouver et supprimer les dashboards dupliqués
+        resp = self.get("/collection/root/items?models=dashboard")
+        if resp.status_code == 200:
+            data = resp.json()
+            items = data.get("data", data) if isinstance(data, dict) else data
+            by_name = {}
+            for item in items:
+                name = item.get("name", "")
+                by_name.setdefault(name, []).append(item)
+
+            deleted = 0
+            for name, group in by_name.items():
+                if len(group) > 1:
+                    group.sort(key=lambda d: d.get("id", 0), reverse=True)
+                    for old_dash in group[1:]:
+                        self.delete(f"/dashboard/{old_dash['id']}")
+                        deleted += 1
+
+            if deleted:
+                logger.info(f"  🗑️  {deleted} dashboards dupliqués supprimés")
 
 
 # ─────────────────────── QUESTIONS CONFIG ────────────────────────────────
 
 def get_questions_config():
-    """Définit les 6 questions (visualisations) du dashboard."""
+    """Définit les 6 questions (visualisations) du dashboard.
+
+    Alignées sur le schéma réel MongoDB :
+    - ohlcv: symbol, interval, timestamp, open, high, low, close, volume, ...
+    - indicators: symbol, timestamp, rsi_14, macd, bollinger_*, sma_*, ema_*, ...
+    - anomalies: symbol, timestamp, close, volume, is_price_drop_anomaly,
+                 is_volume_spike_anomaly, processed_at, ...
+    """
     return [
         {
             "name": "📈 Prix de Clôture (24h)",
@@ -286,7 +410,6 @@ def get_questions_config():
             "viz_settings": {
                 "graph.dimensions": ["timestamp"],
                 "graph.metrics": ["close"],
-                "graph.series_labels": {"symbol": "Symbole"},
             },
             "row": 0, "col": 0, "size_x": 9, "size_y": 5,
         },
@@ -337,80 +460,124 @@ def get_questions_config():
             "row": 5, "col": 0, "size_x": 9, "size_y": 5,
         },
         {
-            "name": "🚨 Anomalies par Type",
-            "description": "Répartition des anomalies détectées par type",
+            "name": "🚨 Anomalies Détectées",
+            "description": "Nombre d'anomalies par type (price drop / volume spike) et par symbole",
             "collection": "anomalies",
             "pipeline": [
+                {"$project": {
+                    "symbol": 1,
+                    "anomaly_type": {
+                        "$cond": {
+                            "if": {"$eq": ["$is_volume_spike_anomaly", True]},
+                            "then": "Volume Spike",
+                            "else": {
+                                "$cond": {
+                                    "if": {"$eq": ["$is_price_drop_anomaly", True]},
+                                    "then": "Price Drop",
+                                    "else": "Other",
+                                }
+                            },
+                        }
+                    },
+                    "_id": 0,
+                }},
                 {"$group": {
-                    "_id": "$anomaly_type",
+                    "_id": {"symbol": "$symbol", "type": "$anomaly_type"},
                     "count": {"$sum": 1},
                 }},
                 {"$project": {
-                    "anomaly_type": "$_id",
+                    "symbol": "$_id.symbol",
+                    "anomaly_type": "$_id.type",
                     "count": 1,
                     "_id": 0,
                 }},
                 {"$sort": {"count": -1}},
             ],
-            "display": "pie",
+            "display": "bar",
             "viz_settings": {
-                "pie.dimension": "anomaly_type",
-                "pie.metric": "count",
+                "graph.dimensions": ["anomaly_type"],
+                "graph.metrics": ["count"],
             },
             "row": 5, "col": 9, "size_x": 9, "size_y": 5,
         },
         {
             "name": "⚠️ Anomalies Récentes",
-            "description": "Les 50 dernières anomalies détectées (toutes sévérités)",
+            "description": "Les 50 dernières anomalies détectées avec détails",
             "collection": "anomalies",
             "pipeline": [
-                {"$sort": {"detected_at": -1}},
+                {"$sort": {"processed_at": -1}},
                 {"$limit": 50},
                 {"$project": {
                     "symbol": 1,
-                    "anomaly_type": 1,
-                    "severity": 1,
-                    "value": 1,
-                    "description": 1,
-                    "detected_at": 1,
+                    "timestamp": 1,
+                    "close": 1,
+                    "volume": 1,
+                    "price_change_percent": 1,
+                    "anomaly_type": {
+                        "$cond": {
+                            "if": {"$eq": ["$is_volume_spike_anomaly", True]},
+                            "then": "🔺 Volume Spike",
+                            "else": {
+                                "$cond": {
+                                    "if": {"$eq": ["$is_price_drop_anomaly", True]},
+                                    "then": "🔻 Price Drop",
+                                    "else": "Other",
+                                }
+                            },
+                        }
+                    },
+                    "processed_at": 1,
                     "_id": 0,
                 }},
             ],
             "display": "table",
             "viz_settings": {
                 "table.columns": [
-                    {"name": "detected_at", "enabled": True},
+                    {"name": "timestamp", "enabled": True},
                     {"name": "symbol", "enabled": True},
                     {"name": "anomaly_type", "enabled": True},
-                    {"name": "severity", "enabled": True},
-                    {"name": "value", "enabled": True},
-                    {"name": "description", "enabled": True},
+                    {"name": "close", "enabled": True},
+                    {"name": "volume", "enabled": True},
+                    {"name": "price_change_percent", "enabled": True},
+                    {"name": "processed_at", "enabled": True},
                 ],
             },
             "row": 10, "col": 0, "size_x": 12, "size_y": 5,
         },
         {
-            "name": "💰 Prix Moyen Journalier",
-            "description": "Prix moyen (close) agrégé par jour et par symbole",
-            "collection": "aggregated_metrics",
+            "name": "💰 Prix Moyen par Symbole",
+            "description": "Prix moyen (close) et volume total agrégés par symbole (depuis ohlcv)",
+            "collection": "ohlcv",
             "pipeline": [
-                {"$match": {"interval": "1d"}},
-                {"$sort": {"period_start": -1}},
-                {"$limit": 90},
+                {"$group": {
+                    "_id": "$symbol",
+                    "avg_close": {"$avg": "$close"},
+                    "max_close": {"$max": "$close"},
+                    "min_close": {"$min": "$close"},
+                    "total_volume": {"$sum": "$volume"},
+                    "nb_candles": {"$sum": 1},
+                }},
                 {"$project": {
-                    "symbol": 1,
-                    "period_start": 1,
-                    "avg_price": 1,
-                    "total_volume": 1,
-                    "price_range_pct": 1,
+                    "symbol": "$_id",
+                    "avg_close": {"$round": ["$avg_close", 2]},
+                    "max_close": {"$round": ["$max_close", 2]},
+                    "min_close": {"$round": ["$min_close", 2]},
+                    "total_volume": {"$round": ["$total_volume", 2]},
+                    "nb_candles": 1,
                     "_id": 0,
                 }},
-                {"$sort": {"period_start": 1}},
+                {"$sort": {"symbol": 1}},
             ],
-            "display": "line",
+            "display": "table",
             "viz_settings": {
-                "graph.dimensions": ["period_start"],
-                "graph.metrics": ["avg_price"],
+                "table.columns": [
+                    {"name": "symbol", "enabled": True},
+                    {"name": "avg_close", "enabled": True},
+                    {"name": "min_close", "enabled": True},
+                    {"name": "max_close", "enabled": True},
+                    {"name": "total_volume", "enabled": True},
+                    {"name": "nb_candles", "enabled": True},
+                ],
             },
             "row": 10, "col": 12, "size_x": 6, "size_y": 5,
         },
@@ -439,7 +606,14 @@ def main():
         logger.error("Login échoué — abandon")
         sys.exit(1)
 
-    # 4. Ajouter MongoDB
+    # 4. Cleanup duplicates
+    logger.info("")
+    logger.info("─" * 40)
+    logger.info("🧹 NETTOYAGE")
+    logger.info("─" * 40)
+    client.cleanup_old_resources()
+
+    # 5. Ajouter MongoDB
     logger.info("")
     logger.info("─" * 40)
     logger.info("📦 CONFIGURATION BASE DE DONNÉES")
@@ -449,7 +623,7 @@ def main():
         logger.error("Impossible d'ajouter MongoDB — abandon")
         sys.exit(1)
 
-    # 5. Créer les questions
+    # 6. Créer les questions
     logger.info("")
     logger.info("─" * 40)
     logger.info("❓ CRÉATION DES QUESTIONS")
@@ -474,7 +648,7 @@ def main():
             "size_y": q["size_y"],
         })
 
-    # 6. Créer le dashboard
+    # 7. Créer le dashboard
     logger.info("")
     logger.info("─" * 40)
     logger.info("📋 CRÉATION DU DASHBOARD")
@@ -484,19 +658,10 @@ def main():
         logger.error("Impossible de créer le dashboard — abandon")
         sys.exit(1)
 
-    # 7. Ajouter les cartes au dashboard
-    for card_info in card_ids:
-        if card_info["card_id"]:
-            client.add_card_to_dashboard(
-                dashboard_id=dash_id,
-                card_id=card_info["card_id"],
-                row=card_info["row"],
-                col=card_info["col"],
-                size_x=card_info["size_x"],
-                size_y=card_info["size_y"],
-            )
+    # 8. Ajouter les cartes au dashboard (en une seule requête PUT)
+    client.add_cards_to_dashboard(dash_id, card_ids)
 
-    # 8. Résumé
+    # 9. Résumé
     logger.info("")
     logger.info("=" * 60)
     logger.info("✅ DASHBOARD CONFIGURÉ AVEC SUCCÈS")
