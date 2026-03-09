@@ -584,6 +584,483 @@ def get_questions_config():
     ]
 
 
+# ─────────────────────── DATAOPS QUESTIONS ───────────────────────────────
+
+DATAOPS_DASHBOARD_NAME = "📊 DataOps Monitoring"
+DATAOPS_DASHBOARD_DESCRIPTION = (
+    "Dashboard de monitoring du pipeline DataOps/MLOps : santé des services, "
+    "qualité des données, fraîcheur, couverture, et métriques MLflow."
+)
+
+
+def get_dataops_questions_config():
+    """Définit les 6 questions du dashboard DataOps Monitoring.
+
+    Source : collection `dataops_metrics` (alimentée par collect_dataops_metrics.py).
+    """
+    return [
+        {
+            "name": "🟢 État des Services",
+            "description": "Dernier état de santé de chaque service du pipeline",
+            "collection": "dataops_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$project": {
+                    "timestamp": 1,
+                    "health_score": 1,
+                    "services_up": 1,
+                    "services_total": 1,
+                    "kafka": "$services.kafka",
+                    "mongodb": "$services.mongodb",
+                    "spark": "$services.spark",
+                    "mlflow": "$services.mlflow",
+                    "airflow": "$services.airflow",
+                    "metabase": "$services.metabase",
+                    "fastapi": "$services.fastapi",
+                    "_id": 0,
+                }},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "timestamp", "enabled": True},
+                    {"name": "health_score", "enabled": True},
+                    {"name": "kafka", "enabled": True},
+                    {"name": "mongodb", "enabled": True},
+                    {"name": "spark", "enabled": True},
+                    {"name": "mlflow", "enabled": True},
+                    {"name": "airflow", "enabled": True},
+                    {"name": "metabase", "enabled": True},
+                    {"name": "fastapi", "enabled": True},
+                ],
+            },
+            "row": 0, "col": 0, "size_x": 18, "size_y": 3,
+        },
+        {
+            "name": "📦 Volume par Collection",
+            "description": "Nombre de documents par collection MongoDB (évolution)",
+            "collection": "dataops_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 50},
+                {"$project": {
+                    "timestamp": 1,
+                    "ohlcv": "$data_volume.ohlcv",
+                    "indicators": "$data_volume.indicators",
+                    "anomalies": "$data_volume.anomalies",
+                    "predictions": "$data_volume.predictions",
+                    "total": "$data_volume.total",
+                    "_id": 0,
+                }},
+                {"$sort": {"timestamp": 1}},
+            ],
+            "display": "line",
+            "viz_settings": {
+                "graph.dimensions": ["timestamp"],
+                "graph.metrics": ["ohlcv", "indicators", "anomalies"],
+            },
+            "row": 3, "col": 0, "size_x": 9, "size_y": 5,
+        },
+        {
+            "name": "⏱️ Fraîcheur des Données",
+            "description": "Âge en minutes de la dernière donnée par collection",
+            "collection": "dataops_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$project": {
+                    "timestamp": 1,
+                    "ohlcv_age_min": "$data_freshness.ohlcv.age_minutes",
+                    "ohlcv_latest": "$data_freshness.ohlcv.latest",
+                    "indicators_age_min": "$data_freshness.indicators.age_minutes",
+                    "indicators_latest": "$data_freshness.indicators.latest",
+                    "anomalies_age_min": "$data_freshness.anomalies.age_minutes",
+                    "anomalies_latest": "$data_freshness.anomalies.latest",
+                    "_id": 0,
+                }},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "timestamp", "enabled": True},
+                    {"name": "ohlcv_latest", "enabled": True},
+                    {"name": "ohlcv_age_min", "enabled": True},
+                    {"name": "indicators_latest", "enabled": True},
+                    {"name": "indicators_age_min", "enabled": True},
+                    {"name": "anomalies_latest", "enabled": True},
+                    {"name": "anomalies_age_min", "enabled": True},
+                ],
+            },
+            "row": 3, "col": 9, "size_x": 9, "size_y": 5,
+        },
+        {
+            "name": "🎯 Couverture par Symbole",
+            "description": "Nombre de documents par symbole et par collection",
+            "collection": "dataops_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$addFields": {
+                    "pairs": [
+                        {"symbol": "BTCUSDT", "ohlcv": "$symbol_coverage.BTCUSDT.ohlcv",
+                         "indicators": "$symbol_coverage.BTCUSDT.indicators",
+                         "anomalies": "$symbol_coverage.BTCUSDT.anomalies"},
+                        {"symbol": "ETHUSDT", "ohlcv": "$symbol_coverage.ETHUSDT.ohlcv",
+                         "indicators": "$symbol_coverage.ETHUSDT.indicators",
+                         "anomalies": "$symbol_coverage.ETHUSDT.anomalies"},
+                        {"symbol": "BNBUSDT", "ohlcv": "$symbol_coverage.BNBUSDT.ohlcv",
+                         "indicators": "$symbol_coverage.BNBUSDT.indicators",
+                         "anomalies": "$symbol_coverage.BNBUSDT.anomalies"},
+                    ],
+                }},
+                {"$unwind": "$pairs"},
+                {"$project": {
+                    "symbol": "$pairs.symbol",
+                    "ohlcv": "$pairs.ohlcv",
+                    "indicators": "$pairs.indicators",
+                    "anomalies": "$pairs.anomalies",
+                    "_id": 0,
+                }},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["symbol"],
+                "graph.metrics": ["ohlcv", "indicators", "anomalies"],
+            },
+            "row": 8, "col": 0, "size_x": 9, "size_y": 5,
+        },
+        {
+            "name": "🧪 Taux de Nulls OHLCV",
+            "description": "Évolution du taux de nulls sur les champs critiques OHLCV",
+            "collection": "dataops_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 50},
+                {"$project": {
+                    "timestamp": 1,
+                    "overall_null_pct": "$null_rates.overall_null_pct",
+                    "sample_size": "$null_rates.sample_size",
+                    "_id": 0,
+                }},
+                {"$sort": {"timestamp": 1}},
+            ],
+            "display": "line",
+            "viz_settings": {
+                "graph.dimensions": ["timestamp"],
+                "graph.metrics": ["overall_null_pct"],
+                "graph.y_axis.title_text": "Null Rate (%)",
+            },
+            "row": 8, "col": 9, "size_x": 9, "size_y": 5,
+        },
+        {
+            "name": "🤖 Métriques MLflow",
+            "description": "État MLflow : expériences, runs, modèles enregistrés et en production",
+            "collection": "dataops_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$project": {
+                    "timestamp": 1,
+                    "experiments": "$mlflow.experiments",
+                    "total_runs": "$mlflow.total_runs",
+                    "registered_models": "$mlflow.registered_models",
+                    "production_models": "$mlflow.production_models",
+                    "mlflow_available": "$mlflow.available",
+                    "_id": 0,
+                }},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "timestamp", "enabled": True},
+                    {"name": "experiments", "enabled": True},
+                    {"name": "total_runs", "enabled": True},
+                    {"name": "registered_models", "enabled": True},
+                    {"name": "production_models", "enabled": True},
+                    {"name": "mlflow_available", "enabled": True},
+                ],
+            },
+            "row": 13, "col": 0, "size_x": 18, "size_y": 3,
+        },
+    ]
+
+
+# ─────────────────────── ML PERFORMANCE QUESTIONS ────────────────────────
+
+ML_PERF_DASHBOARD_NAME = "🤖 ML Performance"
+ML_PERF_DASHBOARD_DESCRIPTION = (
+    "Dashboard de performance des modèles ML : métriques par run (accuracy, precision, recall, F1), "
+    "comparaison XGBoost vs LSTM vs Isolation Forest, modèles en registry MLflow, et drift detection."
+)
+
+
+def get_ml_perf_questions_config():
+    """Définit les 6 questions du dashboard ML Performance.
+
+    Source : collection `ml_metrics` (alimentée par collect_ml_metrics.py).
+    Structure du document :
+      - all_runs[]:  run_id, experiment_name, model_type, f1, accuracy, precision, recall,
+                     n_features, n_train_samples, start_time, symbol, task
+      - registered_models[]: model_name, version, stage, status, run_id
+      - health: score, production_models, best_f1, total_runs, registered_models
+      - drift_results[]: run_id, drift_level, global_drift_score, drifted_features_count
+    """
+    return [
+        {
+            "name": "🏆 Meilleurs Runs ML par Modèle",
+            "description": "Top runs par type de modèle (F1 décroissant) — accuracy, precision, recall, F1",
+            "collection": "ml_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$unwind": "$all_runs"},
+                {"$project": {
+                    "run_name": "$all_runs.run_name",
+                    "experiment": "$all_runs.experiment_name",
+                    "model_type": "$all_runs.model_type",
+                    "symbol": "$all_runs.symbol",
+                    "f1": {"$round": ["$all_runs.f1", 4]},
+                    "accuracy": {"$round": ["$all_runs.accuracy", 4]},
+                    "precision": {"$round": ["$all_runs.precision", 4]},
+                    "recall": {"$round": ["$all_runs.recall", 4]},
+                    "n_features": "$all_runs.n_features",
+                    "n_train_samples": "$all_runs.n_train_samples",
+                    "start_time": "$all_runs.start_time",
+                    "_id": 0,
+                }},
+                {"$sort": {"f1": -1}},
+                {"$limit": 50},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "model_type", "enabled": True},
+                    {"name": "experiment", "enabled": True},
+                    {"name": "symbol", "enabled": True},
+                    {"name": "f1", "enabled": True},
+                    {"name": "accuracy", "enabled": True},
+                    {"name": "precision", "enabled": True},
+                    {"name": "recall", "enabled": True},
+                    {"name": "n_features", "enabled": True},
+                    {"name": "n_train_samples", "enabled": True},
+                    {"name": "start_time", "enabled": True},
+                ],
+            },
+            "row": 0, "col": 0, "size_x": 18, "size_y": 6,
+        },
+        {
+            "name": "⚖️ XGBoost vs LSTM — Prédiction Prix",
+            "description": "Comparaison des métriques entre XGBoost et LSTM sur la tâche de prédiction de prix",
+            "collection": "ml_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$project": {
+                    "prediction_runs": {
+                        "$filter": {
+                            "input": "$all_runs",
+                            "as": "r",
+                            "cond": {"$eq": ["$$r.task", "price_prediction"]},
+                        }
+                    },
+                    "_id": 0,
+                }},
+                {"$unwind": "$prediction_runs"},
+                {"$project": {
+                    "model_type": "$prediction_runs.model_type",
+                    "f1": {"$round": ["$prediction_runs.f1", 4]},
+                    "accuracy": {"$round": ["$prediction_runs.accuracy", 4]},
+                    "precision": {"$round": ["$prediction_runs.precision", 4]},
+                    "recall": {"$round": ["$prediction_runs.recall", 4]},
+                    "_id": 0,
+                }},
+                {"$sort": {"f1": -1}},
+                {"$limit": 20},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["model_type"],
+                "graph.metrics": ["f1", "accuracy", "precision", "recall"],
+                "graph.y_axis.title_text": "Score (0–1)",
+            },
+            "row": 6, "col": 0, "size_x": 9, "size_y": 5,
+        },
+        {
+            "name": "🔍 Isolation Forest vs Autoencoder — Anomalies",
+            "description": "Comparaison des métriques entre Isolation Forest et Autoencoder sur la détection d'anomalies",
+            "collection": "ml_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$project": {
+                    "anomaly_runs": {
+                        "$filter": {
+                            "input": "$all_runs",
+                            "as": "r",
+                            "cond": {"$eq": ["$$r.task", "anomaly_detection"]},
+                        }
+                    },
+                    "_id": 0,
+                }},
+                {"$unwind": "$anomaly_runs"},
+                {"$project": {
+                    "model_type": "$anomaly_runs.model_type",
+                    "f1": {"$round": ["$anomaly_runs.f1", 4]},
+                    "accuracy": {"$round": ["$anomaly_runs.accuracy", 4]},
+                    "precision": {"$round": ["$anomaly_runs.precision", 4]},
+                    "recall": {"$round": ["$anomaly_runs.recall", 4]},
+                    "_id": 0,
+                }},
+                {"$sort": {"f1": -1}},
+                {"$limit": 20},
+            ],
+            "display": "bar",
+            "viz_settings": {
+                "graph.dimensions": ["model_type"],
+                "graph.metrics": ["f1", "accuracy", "precision", "recall"],
+                "graph.y_axis.title_text": "Score (0–1)",
+            },
+            "row": 6, "col": 9, "size_x": 9, "size_y": 5,
+        },
+        {
+            "name": "📋 Modèles en Registry MLflow",
+            "description": "Modèles enregistrés dans MLflow Model Registry avec leur version et stage",
+            "collection": "ml_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$unwind": "$registered_models"},
+                {"$project": {
+                    "model_name": "$registered_models.model_name",
+                    "version": "$registered_models.version",
+                    "stage": "$registered_models.stage",
+                    "status": "$registered_models.status",
+                    "run_id": "$registered_models.run_id",
+                    "_id": 0,
+                }},
+                {"$sort": {"model_name": 1, "version": -1}},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "model_name", "enabled": True},
+                    {"name": "version", "enabled": True},
+                    {"name": "stage", "enabled": True},
+                    {"name": "status", "enabled": True},
+                    {"name": "run_id", "enabled": True},
+                ],
+            },
+            "row": 11, "col": 0, "size_x": 10, "size_y": 4,
+        },
+        {
+            "name": "🌊 Drift Detection — Résultats",
+            "description": "Résultats des runs de détection de drift (niveau global, features driftées)",
+            "collection": "ml_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 5},
+                {"$unwind": {"path": "$drift_results", "preserveNullAndEmptyArrays": True}},
+                {"$project": {
+                    "timestamp": 1,
+                    "run_name": "$drift_results.run_name",
+                    "drift_level": "$drift_results.drift_level",
+                    "global_drift_score": {"$round": ["$drift_results.global_drift_score", 4]},
+                    "drifted_features_count": "$drift_results.drifted_features_count",
+                    "total_features": "$drift_results.total_features",
+                    "ks_statistic_mean": {"$round": ["$drift_results.ks_statistic_mean", 4]},
+                    "_id": 0,
+                }},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "timestamp", "enabled": True},
+                    {"name": "drift_level", "enabled": True},
+                    {"name": "global_drift_score", "enabled": True},
+                    {"name": "drifted_features_count", "enabled": True},
+                    {"name": "total_features", "enabled": True},
+                    {"name": "ks_statistic_mean", "enabled": True},
+                ],
+            },
+            "row": 11, "col": 10, "size_x": 8, "size_y": 4,
+        },
+        {
+            "name": "💚 Score Santé ML Global",
+            "description": "Score de santé ML (0-100), modèles en production, meilleur F1, total runs",
+            "collection": "ml_metrics",
+            "pipeline": [
+                {"$sort": {"timestamp": -1}},
+                {"$limit": 1},
+                {"$project": {
+                    "timestamp": 1,
+                    "health_score": "$health.score",
+                    "production_models": "$health.production_models",
+                    "best_f1": "$health.best_f1",
+                    "total_runs": "$health.total_runs",
+                    "registered_models": "$health.registered_models",
+                    "mlflow_available": 1,
+                    "_id": 0,
+                }},
+            ],
+            "display": "table",
+            "viz_settings": {
+                "table.columns": [
+                    {"name": "timestamp", "enabled": True},
+                    {"name": "health_score", "enabled": True},
+                    {"name": "production_models", "enabled": True},
+                    {"name": "best_f1", "enabled": True},
+                    {"name": "total_runs", "enabled": True},
+                    {"name": "registered_models", "enabled": True},
+                    {"name": "mlflow_available", "enabled": True},
+                ],
+            },
+            "row": 15, "col": 0, "size_x": 18, "size_y": 3,
+        },
+    ]
+
+
+# ─────────────────────── HELPERS ─────────────────────────────────────────
+
+def _setup_dashboard(client, db_id, dashboard_name, dashboard_desc, questions_config, label):
+    """Crée un dashboard avec ses questions."""
+    logger.info("")
+    logger.info("─" * 40)
+    logger.info(f"❓ QUESTIONS — {label}")
+    logger.info("─" * 40)
+
+    card_ids = []
+    for q in questions_config:
+        card_id = client.create_native_question(
+            name=q["name"],
+            description=q["description"],
+            db_id=db_id,
+            collection=q["collection"],
+            pipeline=q["pipeline"],
+            display=q["display"],
+            viz_settings=q.get("viz_settings"),
+        )
+        card_ids.append({
+            "card_id": card_id,
+            "row": q["row"],
+            "col": q["col"],
+            "size_x": q["size_x"],
+            "size_y": q["size_y"],
+        })
+
+    logger.info("")
+    logger.info("─" * 40)
+    logger.info(f"📋 DASHBOARD — {label}")
+    logger.info("─" * 40)
+    dash_id = client.create_dashboard(dashboard_name, dashboard_desc)
+    if not dash_id:
+        logger.error(f"Impossible de créer le dashboard {label}")
+        return None, card_ids
+
+    client.add_cards_to_dashboard(dash_id, card_ids)
+    return dash_id, card_ids
+
+
 # ─────────────────────── MAIN ────────────────────────────────────────────
 
 def main():
@@ -623,55 +1100,48 @@ def main():
         logger.error("Impossible d'ajouter MongoDB — abandon")
         sys.exit(1)
 
-    # 6. Créer les questions
-    logger.info("")
-    logger.info("─" * 40)
-    logger.info("❓ CRÉATION DES QUESTIONS")
-    logger.info("─" * 40)
-    questions_config = get_questions_config()
-    card_ids = []
-    for q in questions_config:
-        card_id = client.create_native_question(
-            name=q["name"],
-            description=q["description"],
-            db_id=db_id,
-            collection=q["collection"],
-            pipeline=q["pipeline"],
-            display=q["display"],
-            viz_settings=q.get("viz_settings"),
-        )
-        card_ids.append({
-            "card_id": card_id,
-            "row": q["row"],
-            "col": q["col"],
-            "size_x": q["size_x"],
-            "size_y": q["size_y"],
-        })
+    # 6. Dashboard 1 — Crypto Market Overview
+    dash1_id, cards1 = _setup_dashboard(
+        client, db_id,
+        DASHBOARD_NAME, DASHBOARD_DESCRIPTION,
+        get_questions_config(),
+        "Crypto Market",
+    )
 
-    # 7. Créer le dashboard
-    logger.info("")
-    logger.info("─" * 40)
-    logger.info("📋 CRÉATION DU DASHBOARD")
-    logger.info("─" * 40)
-    dash_id = client.create_dashboard(DASHBOARD_NAME, DASHBOARD_DESCRIPTION)
-    if not dash_id:
-        logger.error("Impossible de créer le dashboard — abandon")
-        sys.exit(1)
+    # 7. Dashboard 2 — DataOps Monitoring
+    dash2_id, cards2 = _setup_dashboard(
+        client, db_id,
+        DATAOPS_DASHBOARD_NAME, DATAOPS_DASHBOARD_DESCRIPTION,
+        get_dataops_questions_config(),
+        "DataOps Monitoring",
+    )
 
-    # 8. Ajouter les cartes au dashboard (en une seule requête PUT)
-    client.add_cards_to_dashboard(dash_id, card_ids)
+    # 8. Dashboard 3 — ML Performance
+    dash3_id, cards3 = _setup_dashboard(
+        client, db_id,
+        ML_PERF_DASHBOARD_NAME, ML_PERF_DASHBOARD_DESCRIPTION,
+        get_ml_perf_questions_config(),
+        "ML Performance",
+    )
 
     # 9. Résumé
     logger.info("")
     logger.info("=" * 60)
-    logger.info("✅ DASHBOARD CONFIGURÉ AVEC SUCCÈS")
+    logger.info("✅ DASHBOARDS CONFIGURÉS AVEC SUCCÈS")
     logger.info("=" * 60)
-    logger.info(f"📊 Dashboard: {METABASE_URL}/dashboard/{dash_id}")
+    if dash1_id:
+        logger.info(f"📊 Crypto Market:    {METABASE_URL}/dashboard/{dash1_id}")
+    if dash2_id:
+        logger.info(f"📊 DataOps Monitor:  {METABASE_URL}/dashboard/{dash2_id}")
+    if dash3_id:
+        logger.info(f"🤖 ML Performance:   {METABASE_URL}/dashboard/{dash3_id}")
     logger.info(f"🔗 Metabase UI: {METABASE_URL}")
     logger.info(f"👤 Login: {METABASE_EMAIL}")
     logger.info(f"🔑 Password: {METABASE_PASSWORD}")
     logger.info(f"📦 Base de données: MongoDB (id={db_id})")
-    logger.info(f"❓ Questions créées: {sum(1 for c in card_ids if c['card_id'])}/{len(card_ids)}")
+    q_total = len(cards1) + len(cards2) + len(cards3)
+    q_ok = sum(1 for c in cards1 + cards2 + cards3 if c["card_id"])
+    logger.info(f"❓ Questions créées: {q_ok}/{q_total}")
     logger.info("=" * 60)
 
 
