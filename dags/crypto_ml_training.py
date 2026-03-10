@@ -7,8 +7,10 @@ Orchestre l'entraînement automatique des modèles ML :
   3. Training Isolation Forest (détection anomalies) — sur TOUTES les données
   4. Détection de drift (données anciennes vs nouvelles)
   5. Enregistrement des meilleurs modèles dans MLflow Registry
-  6. Mise à jour du marqueur de dernier entraînement
-  7. Résumé du pipeline
+  6. Inférence batch anomélies (Isolation Forest → collection anomalies)
+  7. Prédictions batch (XGBoost → collection predictions)
+  8. Mise à jour du marqueur de dernier entraînement
+  9. Résumé du pipeline
 
 Logique:
   - Le DAG tourne @daily
@@ -215,98 +217,122 @@ with DAG(
     # Tâche 2: Entraînement prédiction prix (XGBoost + LSTM)
     t_train_price = BashOperator(
         task_id="train_price_predictor",
-        bash_command=(
-            "docker exec "
-            "-e MLFLOW_TRACKING_URI=http://mlflow:5000 "
-            "ml-trainer python3 -c \""
-            "import sys; sys.path.insert(0, '/app/src'); "
-            "from ml.feature_engineering import CryptoFeatureEngineer; "
-            "from ml.mlflow_tracking import MLflowExperimentTracker; "
-            "fe = CryptoFeatureEngineer(); "
-            "tracker = MLflowExperimentTracker(); "
-            "symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']; "
-            "results = {}; "
-            "["
-            "  (lambda s: ("
-            "    print(f'Training price predictor for {s}...'),"
-            "    fe.build_feature_matrix(s, limit=0).__class__.__name__"
-            "  ))(s)"
-            "  for s in symbols"
-            "]; "
-            "df = fe.build_feature_matrix('BTCUSDT', limit=0); "
-            "fnames = fe.get_feature_names(df); "
-            "r = tracker.run_prediction_experiment(df, fnames, symbol='BTCUSDT'); "
-            "print(f'Price predictor trained: {r}') "
-            "\""
-        ),
+        bash_command="""
+cat << 'PYEOF' | docker exec -i \
+    -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+    -e GIT_PYTHON_REFRESH=quiet \
+    -e TF_CPP_MIN_LOG_LEVEL=2 \
+    ml-trainer python3
+import sys
+sys.path.insert(0, '/app/src')
+from ml.feature_engineering import CryptoFeatureEngineer
+from ml.mlflow_tracking import MLflowExperimentTracker
+
+fe = CryptoFeatureEngineer()
+tracker = MLflowExperimentTracker()
+
+df_raw = fe.build_feature_matrix('BTCUSDT', limit=50000)
+df = df_raw.tail(30000).reset_index(drop=True)
+print(f'Dataset: {len(df_raw)} raw rows capped to {len(df)} for training')
+del df_raw
+
+fnames = fe.get_feature_names(df)
+r = tracker.run_prediction_experiment(df, fnames, symbol='BTCUSDT', lstm_epochs=30)
+print(f'Price predictor trained: {r}')
+PYEOF
+""",
         execution_timeout=timedelta(hours=1),
     )
 
-    # Tâche 3: Entraînement détection anomalies (Isolation Forest)
+    # Tâche 3: Entraînement détection anomalies (Isolation Forest + Autoencoder)
     t_train_anomaly = BashOperator(
         task_id="train_anomaly_detector",
-        bash_command=(
-            "docker exec "
-            "-e MLFLOW_TRACKING_URI=http://mlflow:5000 "
-            "ml-trainer python3 -c \""
-            "import sys; sys.path.insert(0, '/app/src'); "
-            "from ml.feature_engineering import CryptoFeatureEngineer; "
-            "from ml.mlflow_tracking import MLflowExperimentTracker; "
-            "fe = CryptoFeatureEngineer(); "
-            "tracker = MLflowExperimentTracker(); "
-            "df = fe.build_feature_matrix('BTCUSDT', limit=0); "
-            "fnames = fe.get_feature_names(df); "
-            "r = tracker.run_anomaly_experiment(df, fnames, symbol='BTCUSDT'); "
-            "print(f'Anomaly detector trained: {r}') "
-            "\""
-        ),
+        bash_command="""
+cat << 'PYEOF' | docker exec -i \
+    -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+    -e GIT_PYTHON_REFRESH=quiet \
+    -e TF_CPP_MIN_LOG_LEVEL=2 \
+    ml-trainer python3
+import sys
+sys.path.insert(0, '/app/src')
+from ml.feature_engineering import CryptoFeatureEngineer
+from ml.mlflow_tracking import MLflowExperimentTracker
+
+fe = CryptoFeatureEngineer()
+tracker = MLflowExperimentTracker()
+
+df_raw = fe.build_feature_matrix('BTCUSDT', limit=50000)
+df = df_raw.tail(30000).reset_index(drop=True)
+print(f'Dataset: {len(df_raw)} raw rows capped to {len(df)} for training')
+del df_raw
+
+fnames = fe.get_feature_names(df)
+r = tracker.run_anomaly_experiment(df, fnames, symbol='BTCUSDT', ae_epochs=30)
+print(f'Anomaly detector trained: {r}')
+PYEOF
+""",
         execution_timeout=timedelta(hours=1),
     )
 
     # Tâche 4: Détection de drift
     t_drift = BashOperator(
         task_id="run_drift_detection",
-        bash_command=(
-            "docker exec "
-            "-e MLFLOW_TRACKING_URI=http://mlflow:5000 "
-            "ml-trainer python3 -c \""
-            "import sys; sys.path.insert(0, '/app/src'); "
-            "from ml.feature_engineering import CryptoFeatureEngineer; "
-            "from ml.drift_detection import DataDriftDetector; "
-            "fe = CryptoFeatureEngineer(); "
-            "df = fe.build_feature_matrix('BTCUSDT', limit=0); "
-            "fnames = fe.get_feature_names(df); "
-            "n = len(df); "
-            "split = int(n * 0.7); "
-            "ref_df = df.iloc[:split]; "
-            "curr_df = df.iloc[split:]; "
-            "detector = DataDriftDetector(); "
-            "report = detector.generate_drift_report(ref_df, curr_df, fnames); "
-            "detector.log_drift_to_mlflow(report); "
-            "print(f'Drift report: {report[\\\"summary\\\"]}') "
-            "\""
-        ),
+        bash_command="""
+cat << 'PYEOF' | docker exec -i \
+    -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+    -e GIT_PYTHON_REFRESH=quiet \
+    ml-trainer python3
+import sys
+sys.path.insert(0, '/app/src')
+from ml.feature_engineering import CryptoFeatureEngineer
+from ml.drift_detection import DataDriftDetector
+
+fe = CryptoFeatureEngineer()
+df_raw = fe.build_feature_matrix('BTCUSDT', limit=50000)
+df = df_raw.tail(30000).reset_index(drop=True)
+del df_raw
+
+fnames = fe.get_feature_names(df)
+n = len(df)
+split = int(n * 0.7)
+ref_df = df.iloc[:split]
+curr_df = df.iloc[split:]
+
+detector = DataDriftDetector()
+report = detector.generate_drift_report(ref_df, curr_df, fnames)
+detector.log_drift_to_mlflow(report)
+print(f'Drift: {report["overall_drift_level"]} | {report["drifted_features_count"]}/{report["total_features"]} features drifted')
+PYEOF
+""",
         execution_timeout=timedelta(minutes=30),
     )
 
     # Tâche 5: Enregistrement des meilleurs modèles dans MLflow Registry
     t_register = BashOperator(
         task_id="register_models",
-        bash_command=(
-            "docker exec "
-            "-e MLFLOW_TRACKING_URI=http://mlflow:5000 "
-            "ml-trainer python3 -c \""
-            "import sys; sys.path.insert(0, '/app/src'); "
-            "from ml.mlflow_tracking import MLflowExperimentTracker; "
-            "tracker = MLflowExperimentTracker(); "
-            "v1 = tracker.register_best_model('crypto-price-prediction', metric='f1', model_name='crypto-predictor'); "
-            "v2 = tracker.register_best_model('crypto-anomaly-detection', metric='f1', model_name='crypto-anomaly-detector'); "
-            "print(f'Registered: predictor={v1}, anomaly={v2}'); "
-            "if v1: tracker.promote_model('crypto-predictor', v1, 'Production'); "
-            "if v2: tracker.promote_model('crypto-anomaly-detector', v2, 'Production'); "
-            "print('Models promoted to Production') "
-            "\""
-        ),
+        bash_command="""
+cat << 'PYEOF' | docker exec -i \
+    -e MLFLOW_TRACKING_URI=http://mlflow:5000 \
+    -e GIT_PYTHON_REFRESH=quiet \
+    ml-trainer python3
+import sys
+sys.path.insert(0, '/app/src')
+from ml.mlflow_tracking import MLflowExperimentTracker
+
+tracker = MLflowExperimentTracker()
+
+v1 = tracker.register_best_model('crypto-price-prediction', metric='f1', model_name='crypto-predictor')
+v2 = tracker.register_best_model('crypto-anomaly-detection', metric='f1', model_name='crypto-anomaly-detector')
+print(f'Registered: predictor={v1}, anomaly={v2}')
+
+if v1:
+    tracker.promote_model('crypto-predictor', v1, 'Production')
+if v2:
+    tracker.promote_model('crypto-anomaly-detector', v2, 'Production')
+
+print('Models promoted to Production')
+PYEOF
+""",
         execution_timeout=timedelta(minutes=10),
     )
 
@@ -324,6 +350,193 @@ with DAG(
         provide_context=True,
     )
 
-    # Flow: check → [price, anomaly] en parallèle → drift → register → marker → summary
+    # ─── NOUVELLES TÂCHES D'INFÉRENCE BATCH ───────────────────────────────
+
+    # Tâche 8: Inférence batch anomalies → collection MongoDB 'anomalies'
+    t_anomaly_inference = BashOperator(
+        task_id="run_batch_anomaly_inference",
+        bash_command="""
+cat << 'PYEOF' | docker exec -i \\
+    -e MLFLOW_TRACKING_URI=http://mlflow:5000 \\
+    -e GIT_PYTHON_REFRESH=quiet \\
+    -e TF_CPP_MIN_LOG_LEVEL=2 \\
+    ml-trainer python3
+import sys, logging
+sys.path.insert(0, '/app/src')
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('anomaly_inference')
+
+from ml.feature_engineering import CryptoFeatureEngineer
+from ml.anomaly_detection import CryptoAnomalyDetector
+import numpy as np
+
+MONGODB_URI = "mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin"
+TRADING_PAIRS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+INFERENCE_LIMIT = 5000  # Nombre de bougies récentes à analyser
+
+fe = CryptoFeatureEngineer()
+total_anomalies = 0
+
+for symbol in TRADING_PAIRS:
+    logger.info(f"Inférence anomalies pour {symbol}...")
+    try:
+        df = fe.build_feature_matrix(symbol, limit=INFERENCE_LIMIT)
+        if df is None or len(df) < 100:
+            logger.warning(f"  {symbol}: pas assez de données ({len(df) if df is not None else 0} lignes)")
+            continue
+
+        feature_names = fe.get_feature_names(df)
+
+        # Préparer les features
+        import pandas as pd
+        from sklearn.preprocessing import StandardScaler
+        X_df = df[feature_names].copy()
+        for col in X_df.columns:
+            if X_df[col].dtype == object:
+                X_df[col] = pd.Categorical(X_df[col]).codes
+        X = X_df.values.astype(float)
+
+        # Entraîner un Isolation Forest rapide sur les données récentes
+        detector = CryptoAnomalyDetector()
+        from sklearn.ensemble import IsolationForest
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        if_model = IsolationForest(contamination=0.05, n_estimators=100, random_state=42, n_jobs=-1)
+        if_model.fit(X_scaled)
+        raw_preds = if_model.predict(X_scaled)
+        anomaly_mask = (raw_preds == -1).astype(int)
+
+        count = CryptoAnomalyDetector.save_anomalies_to_mongodb(
+            df=df,
+            anomaly_mask=anomaly_mask,
+            symbol=symbol,
+            interval='1m',
+            model_type='isolation_forest',
+            mongo_uri=MONGODB_URI,
+            database='cryptomarket',
+        )
+        total_anomalies += count
+        logger.info(f"  {symbol}: {count} anomalies sauvegardées")
+
+    except Exception as e:
+        logger.error(f"  {symbol}: erreur inférence anomalies: {e}")
+
+logger.info(f"Total anomalies insérées: {total_anomalies}")
+print(f'Anomaly inference done: {total_anomalies} anomalies saved to MongoDB')
+PYEOF
+""",
+        execution_timeout=timedelta(minutes=30),
+    )
+
+    # Tâche 9: Prédictions batch XGBoost → collection MongoDB 'predictions'
+    t_batch_predictions = BashOperator(
+        task_id="save_batch_predictions",
+        bash_command="""
+cat << 'PYEOF' | docker exec -i \\
+    -e MLFLOW_TRACKING_URI=http://mlflow:5000 \\
+    -e GIT_PYTHON_REFRESH=quiet \\
+    -e TF_CPP_MIN_LOG_LEVEL=2 \\
+    ml-trainer python3
+import sys, logging
+sys.path.insert(0, '/app/src')
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('batch_predictions')
+
+from ml.feature_engineering import CryptoFeatureEngineer
+from ml.model_training import CryptoPricePredictor
+from pymongo import MongoClient
+from datetime import datetime, timezone
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
+from sklearn.model_selection import train_test_split
+
+MONGODB_URI = "mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin"
+TRADING_PAIRS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+INFERENCE_LIMIT = 5000   # Bougies récentes (historique de prédiction)
+TRAIN_LIMIT    = 30000   # Bougies pour entraîner le modèle de référence
+
+client = MongoClient(MONGODB_URI)
+db = client['cryptomarket']
+pred_coll = db['predictions']
+
+fe = CryptoFeatureEngineer()
+predictor = CryptoPricePredictor()
+total_predictions = 0
+now = datetime.now(timezone.utc)
+
+for symbol in TRADING_PAIRS:
+    logger.info(f"Prédictions batch pour {symbol}...")
+    try:
+        # Données d'entraînement
+        df_train = fe.build_feature_matrix(symbol, limit=TRAIN_LIMIT)
+        if df_train is None or len(df_train) < 500:
+            logger.warning(f"  {symbol}: pas assez de données d'entraînement")
+            continue
+
+        feature_names = fe.get_feature_names(df_train)
+        X_train, X_test, y_train, y_test = predictor.prepare_data(df_train, feature_names)
+
+        # Entraîner XGBoost
+        xgb_model, metrics = predictor.train_xgboost(X_train, y_train, X_test, y_test)
+        logger.info(f"  {symbol}: XGBoost F1={metrics['f1']:.3f}")
+
+        # Inférence sur les données récentes
+        df_inf = fe.build_feature_matrix(symbol, limit=INFERENCE_LIMIT)
+        X_df_inf = df_inf[feature_names].copy()
+        for col in X_df_inf.columns:
+            if X_df_inf[col].dtype == object:
+                X_df_inf[col] = pd.Categorical(X_df_inf[col]).codes
+        X_inf = X_df_inf.values.astype(float)
+        X_inf_scaled = predictor.scaler.transform(X_inf)
+
+        preds = xgb_model.predict(X_inf_scaled)
+        probas = xgb_model.predict_proba(X_inf_scaled)[:, 1]  # Probabilité UP
+
+        # Construire les documents
+        records = []
+        for i, (_, row) in enumerate(df_inf.iterrows()):
+            if i >= len(preds):
+                break
+            records.append({
+                'symbol': symbol,
+                'interval': '1m',
+                'timestamp': row.get('timestamp', now),
+                'predicted_direction': int(preds[i]),  # 1=UP, 0=DOWN
+                'direction_label': 'UP' if preds[i] == 1 else 'DOWN',
+                'confidence': float(round(probas[i], 4)),
+                'model_type': 'xgboost',
+                'predicted_at': now,
+                'close_price': float(row.get('close', 0)),
+            })
+
+        if records:
+            # Supprimer les prédictions existantes pour ce symbole avant insertion
+            pred_coll.delete_many({'symbol': symbol})
+            result = pred_coll.insert_many(records)
+            count = len(result.inserted_ids)
+            total_predictions += count
+            logger.info(f"  {symbol}: {count} prédictions sauvegardées")
+
+    except Exception as e:
+        logger.error(f"  {symbol}: erreur prédictions: {e}")
+        import traceback; traceback.print_exc()
+
+client.close()
+logger.info(f"Total prédictions insérées: {total_predictions}")
+print(f'Batch predictions done: {total_predictions} predictions saved to MongoDB')
+PYEOF
+""",
+        execution_timeout=timedelta(hours=1),
+    )
+
+    # Flow:
+    # check → [price, anomaly] en parallèle
+    # [price, anomaly] → drift → register
+    # register → [anomaly_inference, batch_predictions] en parallèle  (NOUVEAU)
+    # [anomaly_inference, batch_predictions] → marker → summary
     t_check >> [t_train_price, t_train_anomaly]
-    [t_train_price, t_train_anomaly] >> t_drift >> t_register >> t_marker >> t_summary
+    [t_train_price, t_train_anomaly] >> t_drift >> t_register
+    t_register >> [t_anomaly_inference, t_batch_predictions]
+    [t_anomaly_inference, t_batch_predictions] >> t_marker >> t_summary
