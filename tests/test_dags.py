@@ -696,9 +696,14 @@ class TestMLTrainingDAG:
         assert "train_anomaly_detector" in task_ids
         assert "run_drift_detection" in task_ids
         assert "register_models" in task_ids
+        assert "run_batch_anomaly_inference" in task_ids   # NOUVEAU
+        assert "save_batch_predictions" in task_ids        # NOUVEAU
         assert "update_training_marker" in task_ids
         assert "log_training_summary" in task_ids
-        assert len(dag.tasks) == 7
+        assert len(dag.tasks) == 9, (
+            f"Attendu 9 tâches, trouvé {len(dag.tasks)}: "
+            f"{[t.task_id for t in dag.tasks]}"
+        )
 
     @patch("pymongo.MongoClient")
     def test_check_new_data_enough(self, mock_mongo_cls):

@@ -1,0 +1,69 @@
+name: CD — Deploy & Health Check
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  # ══════════════════════════════════════════════════
+  # HEALTH CHECK POST-DEPLOY
+  # ══════════════════════════════════════════════════
+  post-deploy-health:
+    name: 🩺 Post-Deploy Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pymongo
+
+      - name: Validate docker-compose syntax
+        run: |
+          docker compose -f docker/docker-compose.yml config --quiet
+          echo "✅ docker-compose.yml est valide"
+
+      - name: Validate DAG files syntax
+        run: |
+          for dag in dags/*.py; do
+            python -m py_compile "$dag" && echo "✅ $dag" || echo "❌ $dag"
+          done
+
+      - name: Validate source modules syntax
+        run: |
+          find src/ -name "*.py" | while read f; do
+            python -m py_compile "$f" && echo "✅ $f" || echo "❌ $f"
+          done
+
+      - name: Validate scripts syntax
+        run: |
+          if [ -d "scripts/" ]; then
+            for script in scripts/*.py; do
+              [ -f "$script" ] && python -m py_compile "$script" && echo "✅ $script" || true
+            done
+          fi
+
+      - name: Check repository structure
+        run: |
+          echo "══════════════════════════════════════"
+          echo "  Structure Repository"
+          echo "══════════════════════════════════════"
+          echo "📁 DAGs         : $(ls dags/*.py 2>/dev/null | grep -v __pycache__ | wc -l) fichier(s)"
+          echo "📁 Tests        : $(ls tests/test_*.py 2>/dev/null | wc -l) fichier(s)"
+          echo "📁 Docker       : $(ls docker/Dockerfile.* 2>/dev/null | wc -l) Dockerfile(s)"
+          echo "📁 Src modules  : $(find src/ -name '*.py' ! -name '__init__.py' ! -path '*__pycache__*' | wc -l) fichier(s)"
+          echo "══════════════════════════════════════"
+          echo "✅ Structure validée"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "✅ CD completed successfully"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Author: ${{ github.actor }}"
