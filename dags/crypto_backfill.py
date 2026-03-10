@@ -40,6 +40,7 @@ default_args = {
 
 # ─────────────────────── TASK FUNCTIONS ──────────────────────────────────
 
+
 def detect_gaps(**context):
     """
     Tâche 1: Analyse MongoDB pour détecter les trous de données OHLCV.
@@ -76,11 +77,9 @@ def detect_gaps(**context):
     gaps_report = {}
     for symbol in symbols:
         # Compter les bougies existantes dans la période
-        existing = ohlcv.count_documents({
-            "symbol": symbol.strip(),
-            "interval": interval,
-            "timestamp": {"$gte": start_dt, "$lte": end_dt}
-        })
+        existing = ohlcv.count_documents(
+            {"symbol": symbol.strip(), "interval": interval, "timestamp": {"$gte": start_dt, "$lte": end_dt}}
+        )
 
         missing = max(0, expected_per_symbol - existing)
         coverage_pct = round((existing / expected_per_symbol * 100), 1) if expected_per_symbol > 0 else 0
@@ -96,10 +95,15 @@ def detect_gaps(**context):
     client.close()
 
     context["ti"].xcom_push(key="gaps_report", value=gaps_report)
-    context["ti"].xcom_push(key="backfill_params", value={
-        "start_date": start_str, "end_date": end_str,
-        "symbols": symbols, "interval": interval,
-    })
+    context["ti"].xcom_push(
+        key="backfill_params",
+        value={
+            "start_date": start_str,
+            "end_date": end_str,
+            "symbols": symbols,
+            "interval": interval,
+        },
+    )
     return gaps_report
 
 
@@ -206,14 +210,11 @@ def validate_backfill(**context):
     Compare les gaps avant/après.
     """
     import logging
-    from datetime import datetime, timezone
-    from pymongo import MongoClient
 
     logger = logging.getLogger(__name__)
     ti = context["ti"]
 
     gaps_before = ti.xcom_pull(task_ids="detect_gaps", key="gaps_report") or {}
-    backfill_params = ti.xcom_pull(task_ids="detect_gaps", key="backfill_params")
     backfill_stats = ti.xcom_pull(task_ids="backfill_from_binance", key="backfill_stats") or {}
 
     logger.info("Validation du backfill:")
@@ -248,7 +249,6 @@ def log_backfill_report(**context):
     gaps = ti.xcom_pull(task_ids="detect_gaps", key="gaps_report") or {}
     stats = ti.xcom_pull(task_ids="backfill_from_binance", key="backfill_stats") or {}
     total = ti.xcom_pull(task_ids="backfill_from_binance", key="backfill_total") or 0
-    validation = ti.xcom_pull(task_ids="validate_backfill", key="validation") or {}
     params = ti.xcom_pull(task_ids="detect_gaps", key="backfill_params") or {}
 
     report = [
@@ -263,7 +263,9 @@ def log_backfill_report(**context):
     for symbol in gaps:
         g = gaps[symbol]
         s = stats.get(symbol, 0)
-        report.append(f"  {symbol}: {g['existing']}→{g['existing']+s} / {g['expected']} ({g['coverage_pct']}% → ajout {s})")
+        report.append(
+            f"  {symbol}: {g['existing']}→{g['existing']+s} / {g['expected']} ({g['coverage_pct']}% → ajout {s})"
+        )
 
     report.extend(["", "=" * 60])
     logger.info("\n".join(report))
@@ -325,7 +327,7 @@ with DAG(
             "/opt/spark/bin/spark-submit "
             "--master local[*] "
             "--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
-            "org.mongodb.spark:mongo-spark-connector_2.12:10.2.1 "
+            "org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 "
             "--conf spark.mongodb.write.connection.uri=" + MONGODB_URI + " "
             "--conf spark.jars.ivy=/tmp/.ivy2 "
             "/opt/spark/work-dir/src/processing/main_pipeline.py "

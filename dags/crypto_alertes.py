@@ -13,7 +13,7 @@ Checks:
 Schedule: Toutes les heures (@hourly)
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 import json
 
 from airflow import DAG
@@ -26,14 +26,14 @@ TRADING_PAIRS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
 # Seuils d'alerte
 ALERT_THRESHOLDS = {
-    "max_data_age_minutes": 10,          # Données considérées stale après 10 min
-    "min_coverage_pct": 95.0,            # Couverture minimale acceptable
-    "price_spike_pct": 5.0,              # Variation prix > 5% = alerte
-    "volume_spike_multiplier": 5.0,      # Volume > 5x moyenne = alerte
-    "rsi_oversold": 20,                  # RSI < 20 = alerte
-    "rsi_overbought": 80,               # RSI > 80 = alerte
-    "max_null_rate_pct": 1.0,            # > 1% nulls = alerte
-    "max_duplicates": 0,                 # Doublons pas tolérés
+    "max_data_age_minutes": 10,  # Données considérées stale après 10 min
+    "min_coverage_pct": 95.0,  # Couverture minimale acceptable
+    "price_spike_pct": 5.0,  # Variation prix > 5% = alerte
+    "volume_spike_multiplier": 5.0,  # Volume > 5x moyenne = alerte
+    "rsi_oversold": 20,  # RSI < 20 = alerte
+    "rsi_overbought": 80,  # RSI > 80 = alerte
+    "max_null_rate_pct": 1.0,  # > 1% nulls = alerte
+    "max_duplicates": 0,  # Doublons pas tolérés
 }
 
 default_args = {
@@ -48,13 +48,14 @@ default_args = {
 
 # ─────────────────────── TASK FUNCTIONS ──────────────────────────────────
 
+
 def check_data_freshness(**context):
     """
     Tâche 1: Vérifie la fraîcheur des données OHLCV dans MongoDB.
     Alerte si les données les plus récentes sont trop anciennes.
     """
     import logging
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
     from pymongo import MongoClient
 
     logger = logging.getLogger(__name__)
@@ -70,18 +71,17 @@ def check_data_freshness(**context):
 
     for symbol in TRADING_PAIRS:
         # Trouver le document le plus récent
-        latest = ohlcv.find_one(
-            {"symbol": symbol},
-            sort=[("timestamp", -1)]
-        )
+        latest = ohlcv.find_one({"symbol": symbol}, sort=[("timestamp", -1)])
 
         if latest is None:
-            alerts.append({
-                "type": "data_missing",
-                "severity": "critical",
-                "symbol": symbol,
-                "message": f"Aucune donnée OHLCV pour {symbol}",
-            })
+            alerts.append(
+                {
+                    "type": "data_missing",
+                    "severity": "critical",
+                    "symbol": symbol,
+                    "message": f"Aucune donnée OHLCV pour {symbol}",
+                }
+            )
             freshness[symbol] = {"status": "MISSING", "age_minutes": None}
             continue
 
@@ -101,12 +101,14 @@ def check_data_freshness(**context):
         }
 
         if age_minutes > max_age:
-            alerts.append({
-                "type": "data_stale",
-                "severity": "high" if age_minutes > max_age * 3 else "medium",
-                "symbol": symbol,
-                "message": f"{symbol} dernière donnée il y a {age_minutes:.0f} min (seuil: {max_age} min)",
-            })
+            alerts.append(
+                {
+                    "type": "data_stale",
+                    "severity": "high" if age_minutes > max_age * 3 else "medium",
+                    "symbol": symbol,
+                    "message": f"{symbol} dernière donnée il y a {age_minutes:.0f} min (seuil: {max_age} min)",
+                }
+            )
             logger.warning(f"⚠️  {symbol} STALE — {age_minutes:.0f} min")
         else:
             logger.info(f"✅ {symbol} FRESH — {age_minutes:.1f} min")
@@ -142,10 +144,12 @@ def detect_market_anomalies(**context):
         logger.info(f"Analyse anomalies {symbol}...")
 
         # 1. Price spikes — dernières bougies
-        recent_candles = list(ohlcv.find(
-            {"symbol": symbol, "timestamp": {"$gte": cutoff_dt}},
-            sort=[("timestamp", -1)],
-        ).limit(60))
+        recent_candles = list(
+            ohlcv.find(
+                {"symbol": symbol, "timestamp": {"$gte": cutoff_dt}},
+                sort=[("timestamp", -1)],
+            ).limit(60)
+        )
 
         if len(recent_candles) >= 2:
             for i in range(len(recent_candles) - 1):
@@ -175,36 +179,40 @@ def detect_market_anomalies(**context):
                         "type": "volume_spike",
                         "severity": "high",
                         "symbol": symbol,
-                        "message": f"Volume spike {symbol}: {latest_vol:.0f} vs avg {avg_vol:.0f} ({latest_vol/avg_vol:.1f}x)",
+                        "message": (
+                            f"Volume spike {symbol}: {latest_vol:.0f} vs avg {avg_vol:.0f}"
+                            f" ({latest_vol/avg_vol:.1f}x)"
+                        ),
                         "value": latest_vol / avg_vol,
                     }
                     alerts.append(alert)
                     logger.warning(f"📊 {alert['message']}")
 
         # 3. RSI extrêmes
-        latest_indicator = indicators.find_one(
-            {"symbol": symbol},
-            sort=[("timestamp", -1)]
-        )
+        latest_indicator = indicators.find_one({"symbol": symbol}, sort=[("timestamp", -1)])
         if latest_indicator and latest_indicator.get("rsi_14") is not None:
             rsi = latest_indicator["rsi_14"]
             if rsi < ALERT_THRESHOLDS["rsi_oversold"]:
-                alerts.append({
-                    "type": "rsi_extreme",
-                    "severity": "medium",
-                    "symbol": symbol,
-                    "message": f"RSI survente {symbol}: {rsi:.1f} (seuil: {ALERT_THRESHOLDS['rsi_oversold']})",
-                    "value": rsi,
-                })
+                alerts.append(
+                    {
+                        "type": "rsi_extreme",
+                        "severity": "medium",
+                        "symbol": symbol,
+                        "message": f"RSI survente {symbol}: {rsi:.1f} (seuil: {ALERT_THRESHOLDS['rsi_oversold']})",
+                        "value": rsi,
+                    }
+                )
                 logger.warning(f"📉 RSI survente {symbol}: {rsi:.1f}")
             elif rsi > ALERT_THRESHOLDS["rsi_overbought"]:
-                alerts.append({
-                    "type": "rsi_extreme",
-                    "severity": "medium",
-                    "symbol": symbol,
-                    "message": f"RSI surachat {symbol}: {rsi:.1f} (seuil: {ALERT_THRESHOLDS['rsi_overbought']})",
-                    "value": rsi,
-                })
+                alerts.append(
+                    {
+                        "type": "rsi_extreme",
+                        "severity": "medium",
+                        "symbol": symbol,
+                        "message": f"RSI surachat {symbol}: {rsi:.1f} (seuil: {ALERT_THRESHOLDS['rsi_overbought']})",
+                        "value": rsi,
+                    }
+                )
                 logger.warning(f"📈 RSI surachat {symbol}: {rsi:.1f}")
 
     # Stocker les anomalies critiques dans MongoDB
@@ -212,16 +220,18 @@ def detect_market_anomalies(**context):
     for alert in alerts:
         if alert["severity"] in ("high", "critical"):
             try:
-                anomalies_coll.insert_one({
-                    "symbol": alert["symbol"],
-                    "anomaly_type": alert["type"],
-                    "severity": alert["severity"],
-                    "detected_at": now,
-                    "value": alert.get("value", 0.0),
-                    "description": alert["message"],
-                    "interval": "1m",
-                    "metadata": {"source": "airflow_alertes"},
-                })
+                anomalies_coll.insert_one(
+                    {
+                        "symbol": alert["symbol"],
+                        "anomaly_type": alert["type"],
+                        "severity": alert["severity"],
+                        "detected_at": now,
+                        "value": alert.get("value", 0.0),
+                        "description": alert["message"],
+                        "interval": "1m",
+                        "metadata": {"source": "airflow_alertes"},
+                    }
+                )
             except Exception as e:
                 logger.error(f"Erreur insertion anomalie: {e}")
 
@@ -254,25 +264,30 @@ def check_pipeline_health(**context):
 
     for symbol in TRADING_PAIRS:
         # 1. Vérifier les nulls dans les données récentes
-        recent = list(ohlcv.find(
-            {"symbol": symbol, "timestamp": {"$gte": cutoff_dt}},
-        ).limit(100))
+        recent = list(
+            ohlcv.find(
+                {"symbol": symbol, "timestamp": {"$gte": cutoff_dt}},
+            ).limit(100)
+        )
 
         if recent:
             required = ["open", "high", "low", "close", "volume"]
             total_fields = len(recent) * len(required)
-            null_count = sum(
-                1 for doc in recent for f in required if doc.get(f) is None
-            )
+            null_count = sum(1 for doc in recent for f in required if doc.get(f) is None)
             null_rate = (null_count / total_fields * 100) if total_fields > 0 else 0
 
             if null_rate > ALERT_THRESHOLDS["max_null_rate_pct"]:
-                alerts.append({
-                    "type": "null_rate_high",
-                    "severity": "high",
-                    "symbol": symbol,
-                    "message": f"Null rate {symbol}: {null_rate:.2f}% (seuil: {ALERT_THRESHOLDS['max_null_rate_pct']}%)",
-                })
+                alerts.append(
+                    {
+                        "type": "null_rate_high",
+                        "severity": "high",
+                        "symbol": symbol,
+                        "message": (
+                            f"Null rate {symbol}: {null_rate:.2f}%"
+                            f" (seuil: {ALERT_THRESHOLDS['max_null_rate_pct']}%)"
+                        ),
+                    }
+                )
 
             health[f"{symbol}_null_rate"] = round(null_rate, 2)
         else:
@@ -281,7 +296,12 @@ def check_pipeline_health(**context):
         # 2. Vérifier les doublons
         pipeline_agg = [
             {"$match": {"symbol": symbol, "timestamp": {"$gte": cutoff_dt}}},
-            {"$group": {"_id": {"symbol": "$symbol", "interval": "$interval", "timestamp": "$timestamp"}, "count": {"$sum": 1}}},
+            {
+                "$group": {
+                    "_id": {"symbol": "$symbol", "interval": "$interval", "timestamp": "$timestamp"},
+                    "count": {"$sum": 1},
+                }
+            },
             {"$match": {"count": {"$gt": 1}}},
             {"$count": "duplicates"},
         ]
@@ -289,12 +309,14 @@ def check_pipeline_health(**context):
         dup_count = dup_result[0]["duplicates"] if dup_result else 0
 
         if dup_count > ALERT_THRESHOLDS["max_duplicates"]:
-            alerts.append({
-                "type": "duplicates",
-                "severity": "medium",
-                "symbol": symbol,
-                "message": f"Doublons détectés {symbol}: {dup_count}",
-            })
+            alerts.append(
+                {
+                    "type": "duplicates",
+                    "severity": "medium",
+                    "symbol": symbol,
+                    "message": f"Doublons détectés {symbol}: {dup_count}",
+                }
+            )
 
         health[f"{symbol}_duplicates"] = dup_count
 
@@ -306,12 +328,17 @@ def check_pipeline_health(**context):
             coverage = round(ind_count / ohlcv_count * 100, 1)
             health[f"{symbol}_indicator_coverage"] = coverage
             if coverage < ALERT_THRESHOLDS["min_coverage_pct"]:
-                alerts.append({
-                    "type": "low_coverage",
-                    "severity": "medium",
-                    "symbol": symbol,
-                    "message": f"Couverture indicateurs {symbol}: {coverage}% (seuil: {ALERT_THRESHOLDS['min_coverage_pct']}%)",
-                })
+                alerts.append(
+                    {
+                        "type": "low_coverage",
+                        "severity": "medium",
+                        "symbol": symbol,
+                        "message": (
+                            f"Couverture indicateurs {symbol}: {coverage}%"
+                            f" (seuil: {ALERT_THRESHOLDS['min_coverage_pct']}%)"
+                        ),
+                    }
+                )
 
     client.close()
 
@@ -349,9 +376,9 @@ def generate_critical_report(**context):
     ti = context["ti"]
 
     all_alerts = (
-        (ti.xcom_pull(task_ids="check_data_freshness", key="freshness_alerts") or []) +
-        (ti.xcom_pull(task_ids="detect_market_anomalies", key="market_alerts") or []) +
-        (ti.xcom_pull(task_ids="check_pipeline_health", key="health_alerts") or [])
+        (ti.xcom_pull(task_ids="check_data_freshness", key="freshness_alerts") or [])
+        + (ti.xcom_pull(task_ids="detect_market_anomalies", key="market_alerts") or [])
+        + (ti.xcom_pull(task_ids="check_pipeline_health", key="health_alerts") or [])
     )
 
     report = [
@@ -385,11 +412,10 @@ def generate_normal_report(**context):
     ti = context["ti"]
 
     freshness = ti.xcom_pull(task_ids="check_data_freshness", key="freshness") or {}
-    health = ti.xcom_pull(task_ids="check_pipeline_health", key="health") or {}
     all_alerts = (
-        (ti.xcom_pull(task_ids="check_data_freshness", key="freshness_alerts") or []) +
-        (ti.xcom_pull(task_ids="detect_market_anomalies", key="market_alerts") or []) +
-        (ti.xcom_pull(task_ids="check_pipeline_health", key="health_alerts") or [])
+        (ti.xcom_pull(task_ids="check_data_freshness", key="freshness_alerts") or [])
+        + (ti.xcom_pull(task_ids="detect_market_anomalies", key="market_alerts") or [])
+        + (ti.xcom_pull(task_ids="check_pipeline_health", key="health_alerts") or [])
     )
 
     report = [

@@ -11,7 +11,7 @@ import logging
 import numpy as np
 import pandas as pd
 from pymongo import MongoClient
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 from .config import mongodb_config, feature_config
 
@@ -56,12 +56,7 @@ class CryptoFeatureEngineer:
         """Creates a MongoDB client connection."""
         return MongoClient(self.mongo_uri)
 
-    def load_ohlcv_data(
-        self,
-        symbol: str,
-        interval: str = "1m",
-        limit: int = 5000
-    ) -> pd.DataFrame:
+    def load_ohlcv_data(self, symbol: str, interval: str = "1m", limit: int = 5000) -> pd.DataFrame:
         """
         Loads OHLCV data from MongoDB.
 
@@ -80,10 +75,9 @@ class CryptoFeatureEngineer:
             db = client[self.database]
             collection = db[mongodb_config.ohlcv_collection]
 
-            cursor = collection.find(
-                {"symbol": symbol, "interval": interval},
-                {"_id": 0}
-            ).sort("timestamp", -1).limit(limit)
+            cursor = (
+                collection.find({"symbol": symbol, "interval": interval}, {"_id": 0}).sort("timestamp", -1).limit(limit)
+            )
 
             df = pd.DataFrame(list(cursor))
 
@@ -98,12 +92,7 @@ class CryptoFeatureEngineer:
         finally:
             client.close()
 
-    def load_indicators_data(
-        self,
-        symbol: str,
-        interval: str = "1m",
-        limit: int = 5000
-    ) -> pd.DataFrame:
+    def load_indicators_data(self, symbol: str, interval: str = "1m", limit: int = 5000) -> pd.DataFrame:
         """
         Loads technical indicators from MongoDB.
 
@@ -122,10 +111,9 @@ class CryptoFeatureEngineer:
             db = client[self.database]
             collection = db[mongodb_config.indicators_collection]
 
-            cursor = collection.find(
-                {"symbol": symbol, "interval": interval},
-                {"_id": 0}
-            ).sort("timestamp", -1).limit(limit)
+            cursor = (
+                collection.find({"symbol": symbol, "interval": interval}, {"_id": 0}).sort("timestamp", -1).limit(limit)
+            )
 
             df = pd.DataFrame(list(cursor))
 
@@ -141,10 +129,7 @@ class CryptoFeatureEngineer:
             client.close()
 
     @staticmethod
-    def merge_ohlcv_indicators(
-        ohlcv_df: pd.DataFrame,
-        indicators_df: pd.DataFrame
-    ) -> pd.DataFrame:
+    def merge_ohlcv_indicators(ohlcv_df: pd.DataFrame, indicators_df: pd.DataFrame) -> pd.DataFrame:
         """
         Merges OHLCV and indicators on (symbol, interval, timestamp).
 
@@ -158,10 +143,7 @@ class CryptoFeatureEngineer:
 
         # Drop columns already present in OHLCV (except join keys)
         join_keys = ["symbol", "interval", "timestamp"]
-        duplicate_cols = [
-            c for c in indicators_df.columns
-            if c in ohlcv_df.columns and c not in join_keys
-        ]
+        duplicate_cols = [c for c in indicators_df.columns if c in ohlcv_df.columns and c not in join_keys]
         if duplicate_cols:
             indicators_df = indicators_df.drop(columns=duplicate_cols)
 
@@ -285,7 +267,7 @@ class CryptoFeatureEngineer:
             macd_diff = df["macd"] - df["macd_signal"]
             macd_diff_prev = macd_diff.shift(1)
             df["macd_cross_signal"] = 0
-            df.loc[(macd_diff > 0) & (macd_diff_prev <= 0), "macd_cross_signal"] = 1   # bullish
+            df.loc[(macd_diff > 0) & (macd_diff_prev <= 0), "macd_cross_signal"] = 1  # bullish
             df.loc[(macd_diff < 0) & (macd_diff_prev >= 0), "macd_cross_signal"] = -1  # bearish
         else:
             logger.warning("  macd/macd_signal not found, skipping macd_cross_signal")
@@ -407,11 +389,21 @@ class CryptoFeatureEngineer:
         """
         exclude = set(self.config.metadata_columns + self.config.target_columns)
         # Also exclude any extra processing metadata
-        exclude.update([
-            "calculated_at", "processed_at", "processing_timestamp",
-            "open", "high", "low", "close", "volume", "num_trades",
-            "price_change", "price_change_pct"
-        ])
+        exclude.update(
+            [
+                "calculated_at",
+                "processed_at",
+                "processing_timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "num_trades",
+                "price_change",
+                "price_change_pct",
+            ]
+        )
         features = [c for c in df.columns if c not in exclude]
         return sorted(features)
 
@@ -420,11 +412,7 @@ class CryptoFeatureEngineer:
     # ------------------------------------------------------------------
 
     def build_feature_matrix(
-        self,
-        symbol: str,
-        interval: str = "1m",
-        limit: int = 5000,
-        dropna: bool = True
+        self, symbol: str, interval: str = "1m", limit: int = 5000, dropna: bool = True
     ) -> pd.DataFrame:
         """
         End-to-end pipeline: load data → engineer features → clean → return.
@@ -471,15 +459,11 @@ class CryptoFeatureEngineer:
 
         feature_names = self.get_feature_names(df)
         logger.info(f"  Features: {len(feature_names)} columns")
-        logger.info(f"========== Feature matrix ready ==========")
+        logger.info("========== Feature matrix ready ==========")
 
         return df
 
-    def build_feature_matrix_from_dataframe(
-        self,
-        df: pd.DataFrame,
-        dropna: bool = True
-    ) -> pd.DataFrame:
+    def build_feature_matrix_from_dataframe(self, df: pd.DataFrame, dropna: bool = True) -> pd.DataFrame:
         """
         Builds features from an already-loaded DataFrame (useful for testing
         or when data is supplied externally instead of from MongoDB).

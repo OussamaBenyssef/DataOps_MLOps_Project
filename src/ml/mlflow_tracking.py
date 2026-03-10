@@ -12,9 +12,7 @@ Usage:
 """
 
 import logging
-import os
 import json
-import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -34,7 +32,35 @@ logger = logging.getLogger(__name__)
 def _import_mlflow_keras():
     """Lazy import mlflow.keras to avoid TensorFlow startup."""
     import mlflow.keras
+
     return mlflow.keras
+
+
+def _safe_log_model(log_fn, model, artifact_name: str):
+    """
+    Tries the native mlflow log_model and falls back to joblib artifact
+    if the MLflow server version doesn't support the SDK API (e.g. v2.9.x).
+
+    Uses `name=` kwarg to silence the `artifact_path` deprecation warning
+    introduced in mlflow >= 2.14.
+    """
+    import warnings
+
+    try:
+        # Suppress the artifact_path deprecation warning from newer SDK vs old server
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            warnings.filterwarnings("ignore", message=".*artifact_path.*")
+            log_fn(model, name=artifact_name)
+    except Exception as e:
+        logger.warning(f"Native log_model failed ({e}), falling back to joblib artifact")
+        import tempfile
+        import joblib as _joblib
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = f"{tmpdir}/{artifact_name}.joblib"
+            _joblib.dump(model, path)
+            mlflow.log_artifact(path, artifact_name)
 
 
 class MLflowExperimentTracker:
@@ -97,75 +123,90 @@ class MLflowExperimentTracker:
         logger.info("=" * 60)
 
         predictor = CryptoPricePredictor()
-        X_train, X_test, y_train, y_test = predictor.prepare_data(
-            df, feature_names
-        )
+        X_train, X_test, y_train, y_test = predictor.prepare_data(df, feature_names)
 
         results = {}
 
         # --- XGBoost Run ---
         xgb_params = xgboost_params or {
-            "max_depth": 6, "n_estimators": 100, "learning_rate": 0.1,
+            "max_depth": 6,
+            "n_estimators": 100,
+            "learning_rate": 0.1,
         }
         with mlflow.start_run(run_name=f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            mlflow.set_tags({
-                "model_type": "xgboost",
-                "symbol": symbol,
-                "interval": interval,
-                "task": "price_prediction",
-            })
-            mlflow.log_params({
-                "max_depth": xgb_params.get("max_depth", 6),
-                "n_estimators": xgb_params.get("n_estimators", 100),
-                "learning_rate": xgb_params.get("learning_rate", 0.1),
-                "test_size": predictor.test_size,
-                "n_features": len(feature_names),
-                "n_train_samples": X_train.shape[0],
-            })
-
-            xgb_model, xgb_metrics = predictor.train_xgboost(
-                X_train, y_train, X_test, y_test, xgb_params
+            mlflow.set_tags(
+                {
+                    "model_type": "xgboost",
+                    "symbol": symbol,
+                    "interval": interval,
+                    "task": "price_prediction",
+                }
             )
+            mlflow.log_params(
+                {
+                    "max_depth": xgb_params.get("max_depth", 6),
+                    "n_estimators": xgb_params.get("n_estimators", 100),
+                    "learning_rate": xgb_params.get("learning_rate", 0.1),
+                    "test_size": predictor.test_size,
+                    "n_features": len(feature_names),
+                    "n_train_samples": X_train.shape[0],
+                }
+            )
+
+            xgb_model, xgb_metrics = predictor.train_xgboost(X_train, y_train, X_test, y_test, xgb_params)
 
             mlflow.log_metrics(xgb_metrics)
-            mlflow.xgboost.log_model(xgb_model, "model")
-            mlflow.log_text(
-                json.dumps(feature_names, indent=2), "feature_names.json"
-            )
+            _safe_log_model(mlflow.xgboost.log_model, xgb_model, "model")
+            mlflow.log_text(json.dumps(feature_names, indent=2), "feature_names.json")
 
             results["xgboost_run_id"] = mlflow.active_run().info.run_id
             results["xgboost_metrics"] = xgb_metrics
 
         logger.info(f"  XGBoost run: {results['xgboost_run_id']}")
 
+        # Free XGBoost arrays from memory before loading TensorFlow
+        import gc
+
+        del xgb_model
+        gc.collect()
+        logger.info("  XGBoost model freed from memory before LSTM")
+
         # --- LSTM Run ---
         mlflow_keras = _import_mlflow_keras()
         with mlflow.start_run(run_name=f"lstm_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            mlflow.set_tags({
-                "model_type": "lstm",
-                "symbol": symbol,
-                "interval": interval,
-                "task": "price_prediction",
-            })
-            mlflow.log_params({
-                "sequence_length": predictor.sequence_length,
-                "epochs": lstm_epochs,
-                "batch_size": lstm_batch_size,
-                "lstm_units_1": 64,
-                "lstm_units_2": 32,
-                "dropout": 0.2,
-                "test_size": predictor.test_size,
-                "n_features": len(feature_names),
-            })
+            mlflow.set_tags(
+                {
+                    "model_type": "lstm",
+                    "symbol": symbol,
+                    "interval": interval,
+                    "task": "price_prediction",
+                }
+            )
+            mlflow.log_params(
+                {
+                    "sequence_length": predictor.sequence_length,
+                    "epochs": lstm_epochs,
+                    "batch_size": lstm_batch_size,
+                    "lstm_units_1": 64,
+                    "lstm_units_2": 32,
+                    "dropout": 0.2,
+                    "test_size": predictor.test_size,
+                    "n_features": len(feature_names),
+                }
+            )
 
             lstm_model, lstm_metrics = predictor.train_lstm(
-                X_train, y_train, X_test, y_test,
-                epochs=lstm_epochs, batch_size=lstm_batch_size,
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                epochs=lstm_epochs,
+                batch_size=lstm_batch_size,
             )
 
             mlflow.log_metrics(lstm_metrics)
             if lstm_model is not None:
-                mlflow_keras.log_model(lstm_model, "model")
+                _safe_log_model(mlflow_keras.log_model, lstm_model, "model")
 
             results["lstm_run_id"] = mlflow.active_run().info.run_id
             results["lstm_metrics"] = lstm_metrics
@@ -173,9 +214,7 @@ class MLflowExperimentTracker:
         logger.info(f"  LSTM run: {results['lstm_run_id']}")
 
         # Best model
-        results["best_model"] = (
-            "xgboost" if xgb_metrics["f1"] >= lstm_metrics["f1"] else "lstm"
-        )
+        results["best_model"] = "xgboost" if xgb_metrics["f1"] >= lstm_metrics["f1"] else "lstm"
         logger.info(f"  Best: {results['best_model'].upper()}")
 
         return results
@@ -206,36 +245,34 @@ class MLflowExperimentTracker:
         logger.info("=" * 60)
 
         detector = CryptoAnomalyDetector()
-        X_train, X_test, y_train, y_test = detector.prepare_data(
-            df, feature_names
-        )
+        X_train, X_test, y_train, y_test = detector.prepare_data(df, feature_names)
 
         results = {}
 
         # --- Isolation Forest Run ---
         with mlflow.start_run(run_name=f"isolation_forest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            mlflow.set_tags({
-                "model_type": "isolation_forest",
-                "symbol": symbol,
-                "interval": interval,
-                "task": "anomaly_detection",
-            })
-            mlflow.log_params({
-                "contamination": detector.contamination,
-                "n_estimators": anomaly_config.n_estimators,
-                "n_features": len(feature_names),
-                "n_train_samples": X_train.shape[0],
-            })
-
-            if_model, if_metrics = detector.train_isolation_forest(
-                X_train, X_test, y_test, if_params
+            mlflow.set_tags(
+                {
+                    "model_type": "isolation_forest",
+                    "symbol": symbol,
+                    "interval": interval,
+                    "task": "anomaly_detection",
+                }
+            )
+            mlflow.log_params(
+                {
+                    "contamination": detector.contamination,
+                    "n_estimators": anomaly_config.n_estimators,
+                    "n_features": len(feature_names),
+                    "n_train_samples": X_train.shape[0],
+                }
             )
 
-            numeric_metrics = {
-                k: v for k, v in if_metrics.items() if isinstance(v, (int, float))
-            }
+            if_model, if_metrics = detector.train_isolation_forest(X_train, X_test, y_test, if_params)
+
+            numeric_metrics = {k: v for k, v in if_metrics.items() if isinstance(v, (int, float))}
             mlflow.log_metrics(numeric_metrics)
-            mlflow.sklearn.log_model(if_model, "model")
+            _safe_log_model(mlflow.sklearn.log_model, if_model, "model")
 
             results["if_run_id"] = mlflow.active_run().info.run_id
             results["if_metrics"] = if_metrics
@@ -245,31 +282,36 @@ class MLflowExperimentTracker:
         # --- Autoencoder Run ---
         mlflow_keras = _import_mlflow_keras()
         with mlflow.start_run(run_name=f"autoencoder_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            mlflow.set_tags({
-                "model_type": "autoencoder",
-                "symbol": symbol,
-                "interval": interval,
-                "task": "anomaly_detection",
-            })
-            mlflow.log_params({
-                "latent_dim": anomaly_config.autoencoder_latent_dim,
-                "epochs": ae_epochs,
-                "batch_size": ae_batch_size,
-                "threshold_percentile": anomaly_config.reconstruction_threshold_percentile,
-                "n_features": len(feature_names),
-            })
-
-            ae_model, ae_threshold, ae_metrics = detector.train_autoencoder(
-                X_train, X_test, y_test,
-                epochs=ae_epochs, batch_size=ae_batch_size,
+            mlflow.set_tags(
+                {
+                    "model_type": "autoencoder",
+                    "symbol": symbol,
+                    "interval": interval,
+                    "task": "anomaly_detection",
+                }
+            )
+            mlflow.log_params(
+                {
+                    "latent_dim": anomaly_config.autoencoder_latent_dim,
+                    "epochs": ae_epochs,
+                    "batch_size": ae_batch_size,
+                    "threshold_percentile": anomaly_config.reconstruction_threshold_percentile,
+                    "n_features": len(feature_names),
+                }
             )
 
-            numeric_metrics = {
-                k: v for k, v in ae_metrics.items() if isinstance(v, (int, float))
-            }
+            ae_model, ae_threshold, ae_metrics = detector.train_autoencoder(
+                X_train,
+                X_test,
+                y_test,
+                epochs=ae_epochs,
+                batch_size=ae_batch_size,
+            )
+
+            numeric_metrics = {k: v for k, v in ae_metrics.items() if isinstance(v, (int, float))}
             mlflow.log_metrics(numeric_metrics)
             if ae_model is not None:
-                mlflow_keras.log_model(ae_model, "model")
+                _safe_log_model(mlflow_keras.log_model, ae_model, "model")
             mlflow.log_params({"ae_threshold": ae_threshold})
 
             results["ae_run_id"] = mlflow.active_run().info.run_id
@@ -278,10 +320,7 @@ class MLflowExperimentTracker:
 
         logger.info(f"  AE run: {results['ae_run_id']}")
 
-        results["best_model"] = (
-            "isolation_forest" if if_metrics["f1"] >= ae_metrics["f1"]
-            else "autoencoder"
-        )
+        results["best_model"] = "isolation_forest" if if_metrics["f1"] >= ae_metrics["f1"] else "autoencoder"
         logger.info(f"  Best: {results['best_model'].upper()}")
 
         return results
@@ -298,14 +337,8 @@ class MLflowExperimentTracker:
     ) -> Optional[str]:
         """
         Finds the best run in an experiment and registers its model.
-
-        Args:
-            experiment_name: MLflow experiment name
-            metric:          Metric to optimize (default: f1)
-            model_name:      Registry name (default: experiment_name)
-
-        Returns:
-            Model version string, or None if failed
+        Uses MlflowClient directly to avoid SDK-level /logged-models/search
+        calls that fail against MLflow server v2.9.2.
         """
         model_name = model_name or experiment_name.replace(" ", "-")
         best_run = self.get_best_run(experiment_name, metric)
@@ -318,8 +351,21 @@ class MLflowExperimentTracker:
         model_uri = f"runs:/{run_id}/model"
 
         try:
-            result = mlflow.register_model(model_uri, model_name)
-            version = result.version
+            # Ensure the registered model exists (create if not)
+            try:
+                self.client.create_registered_model(model_name)
+                logger.info(f"  Created new registered model '{model_name}'")
+            except Exception:
+                pass  # Already exists — ignore
+
+            # Create the model version directly via MlflowClient (bypasses
+            # the /logged-models/search endpoint not present in MLflow 2.9.2)
+            mv = self.client.create_model_version(
+                name=model_name,
+                source=model_uri,
+                run_id=run_id,
+            )
+            version = mv.version
             logger.info(
                 f"  Registered model '{model_name}' v{version} "
                 f"(run: {run_id}, {metric}: {best_run.data.metrics.get(metric, 'N/A')})"
@@ -476,14 +522,14 @@ class MLflowExperimentTracker:
         experiments = self.client.search_experiments()
         rows = []
         for exp in experiments:
-            runs = self.client.search_runs(
-                experiment_ids=[exp.experiment_id], max_results=1000
+            runs = self.client.search_runs(experiment_ids=[exp.experiment_id], max_results=1000)
+            rows.append(
+                {
+                    "experiment_id": exp.experiment_id,
+                    "name": exp.name,
+                    "run_count": len(runs),
+                    "lifecycle_stage": exp.lifecycle_stage,
+                }
             )
-            rows.append({
-                "experiment_id": exp.experiment_id,
-                "name": exp.name,
-                "run_count": len(runs),
-                "lifecycle_stage": exp.lifecycle_stage,
-            })
 
         return pd.DataFrame(rows)

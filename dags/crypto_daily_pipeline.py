@@ -12,6 +12,8 @@ Orchestre le pipeline quotidien de données crypto :
 Schedule: @daily
 """
 
+import json
+
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -37,6 +39,7 @@ default_args = {
 
 
 # ─────────────────────── TASK FUNCTIONS ──────────────────────────────────
+
 
 def check_services(**context):
     """
@@ -72,10 +75,7 @@ def check_services(**context):
     # Vérifier que tous les services sont UP
     failed = [name for name, status in results.items() if "DOWN" in status]
     if failed:
-        raise RuntimeError(
-            f"Services indisponibles : {', '.join(failed)}. "
-            f"Résultats complets : {results}"
-        )
+        raise RuntimeError(f"Services indisponibles : {', '.join(failed)}. " f"Résultats complets : {results}")
 
     logger.info(f"Tous les services sont opérationnels : {results}")
     context["ti"].xcom_push(key="services_status", value=results)
@@ -116,7 +116,9 @@ def collect_historical_data(**context):
     stats = {}
 
     for symbol in TRADING_PAIRS:
-        logger.info(f"Collecte {symbol} — {start_time.strftime('%Y-%m-%d %H:%M')} → {end_time.strftime('%Y-%m-%d %H:%M')}")
+        logger.info(
+            f"Collecte {symbol} — {start_time.strftime('%Y-%m-%d %H:%M')} → {end_time.strftime('%Y-%m-%d %H:%M')}"
+        )
         symbol_count = 0
         current_start = start_ms
 
@@ -189,16 +191,12 @@ def compute_quality_metrics(**context):
     Vérifie le nombre de documents, les taux de null, et la couverture.
     """
     import logging
-    from datetime import datetime, timezone, timedelta
     from pymongo import MongoClient
 
     logger = logging.getLogger(__name__)
 
     client = MongoClient(MONGODB_URI)
     db = client["cryptomarket"]
-
-    # Période d'analyse : dernières 24h
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
     metrics = {}
 
@@ -299,9 +297,6 @@ def log_pipeline_summary(**context):
 
 # ─────────────────────── DAG DEFINITION ──────────────────────────────────
 
-# Import json ici pour compute_quality_metrics
-import json
-
 with DAG(
     dag_id="crypto_daily_pipeline",
     default_args=default_args,
@@ -335,7 +330,7 @@ with DAG(
             "/opt/spark/bin/spark-submit "
             "--master local[*] "
             "--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
-            "org.mongodb.spark:mongo-spark-connector_2.12:10.2.1 "
+            "org.mongodb.spark:mongo-spark-connector_2.12:10.4.0 "
             "--conf spark.mongodb.write.connection.uri={{ params.mongodb_uri }} "
             "--conf spark.jars.ivy=/tmp/.ivy2 "
             "/opt/spark/work-dir/src/processing/main_pipeline.py "
@@ -360,32 +355,79 @@ with DAG(
     )
 
     # Tâche 6a: Ingestion métadonnées Kafka → DataHub
+    # Installe grpcio dans le venv (requis par ConfluentSchemaRegistry),
+    # attend que GMS soit prêt, puis lance l'ingestion Kafka.
     t_datahub_kafka = BashOperator(
         task_id="ingest_datahub_kafka",
         bash_command=(
+            # 1) Installer toutes les dépendances Kafka dans le VENV datahub (grpcio, networkx…)
+            "echo '📦 Installation acryl-datahub[kafka] dans le venv...' && "
+            "docker exec datahub-actions "
+            "  /home/datahub/.venv/bin/pip install --quiet 'acryl-datahub[kafka]' && "
+            "echo '✅ acryl-datahub[kafka] installé.' && "
+            # 2) Attendre que GMS réponde (max 120s) via /config
+            "echo '⏳ Attente DataHub GMS...' && "
+            "for i in $(seq 1 24); do "
+            "  docker exec datahub-actions "
+            "    curl -sf http://datahub-gms:8080/config > /dev/null 2>&1 && "
+            "  echo '✅ DataHub GMS prêt.' && break || "
+            '  (echo "  tentative $i/24 — GMS pas encore prêt…" && sleep 5); '
+            "done && "
+            # 3) Lancer l'ingestion Kafka
             "docker exec datahub-actions "
             "datahub ingest -c /etc/datahub/recipes/kafka_recipe.yml"
         ),
-        execution_timeout=timedelta(minutes=10),
+        execution_timeout=timedelta(minutes=15),
     )
 
     # Tâche 6b: Ingestion métadonnées MongoDB → DataHub
+    # Utilise le pip du VENV datahub (/home/datahub/.venv/bin/pip) pour installer
+    # acryl-datahub[mongodb] dans le bon environnement Python, puis lance l'ingestion.
     t_datahub_mongodb = BashOperator(
         task_id="ingest_datahub_mongodb",
         bash_command=(
+            # 1) Installer le plugin mongodb dans le VENV datahub (idempotent)
+            "echo '📦 Installation acryl-datahub[mongodb] dans le venv...' && "
+            "docker exec datahub-actions "
+            "  /home/datahub/.venv/bin/pip install --quiet 'acryl-datahub[mongodb]' && "
+            "echo '✅ Dépendance mongodb installée.' && "
+            # 2) Attendre que GMS réponde (max 120s)
+            "echo '⏳ Attente DataHub GMS...' && "
+            "for i in $(seq 1 24); do "
+            "  docker exec datahub-actions "
+            "    curl -sf http://datahub-gms:8080/config > /dev/null 2>&1 && "
+            "  echo '✅ DataHub GMS prêt.' && break || "
+            '  (echo "  tentative $i/24 — GMS pas encore prêt…" && sleep 5); '
+            "done && "
+            # 3) Lancer l'ingestion MongoDB
             "docker exec datahub-actions "
             "datahub ingest -c /etc/datahub/recipes/mongodb_recipe.yml"
         ),
-        execution_timeout=timedelta(minutes=10),
+        execution_timeout=timedelta(minutes=15),
     )
 
     # Tâche 6c: Émission du lineage données → DataHub
+    # Copie src/lineage/ dans le container puis exécute emit_lineage.py
     t_datahub_lineage = BashOperator(
         task_id="emit_datahub_lineage",
         bash_command=(
+            # 1) Créer la structure de répertoires dans le container
+            "docker exec datahub-actions mkdir -p /tmp/lineage_pkg/src/lineage && "
+            # 2) Copier les modules nécessaires depuis l'hôte (montés dans airflow via /opt/airflow/src)
+            "docker cp /opt/airflow/src/lineage/emit_lineage.py "
+            "datahub-actions:/tmp/lineage_pkg/src/lineage/emit_lineage.py && "
+            "docker cp /opt/airflow/src/lineage/config.py "
+            "datahub-actions:/tmp/lineage_pkg/src/lineage/config.py && "
+            # 3) Créer les __init__.py pour en faire des packages Python
+            "docker exec datahub-actions touch /tmp/lineage_pkg/src/__init__.py && "
+            "docker exec datahub-actions touch /tmp/lineage_pkg/src/lineage/__init__.py && "
+            # 4) Exécuter le script avec le bon PYTHONPATH et le venv datahub
             "docker exec "
             "-e DATAHUB_GMS_URL=http://datahub-gms:8080 "
-            "datahub-actions python3 /tmp/emit_all.py"
+            "-e PYTHONPATH=/tmp/lineage_pkg "
+            "datahub-actions "
+            "/home/datahub/.venv/bin/python /tmp/lineage_pkg/src/lineage/emit_lineage.py "
+            "--gms-url http://datahub-gms:8080"
         ),
         execution_timeout=timedelta(minutes=30),
     )

@@ -47,6 +47,7 @@ default_args = {
 
 # ─────────────────────── TASK FUNCTIONS ──────────────────────────────────
 
+
 def check_new_data(**context):
     """
     Tâche 1 (ShortCircuit): Vérifie s'il y a assez de NOUVELLES données
@@ -81,10 +82,12 @@ def check_new_data(**context):
     total_new = 0
     new_data_stats = {}
     for symbol in TRADING_PAIRS:
-        count = db["ohlcv"].count_documents({
-            "symbol": symbol,
-            "timestamp": {"$gt": last_training_ts},
-        })
+        count = db["ohlcv"].count_documents(
+            {
+                "symbol": symbol,
+                "timestamp": {"$gt": last_training_ts},
+            }
+        )
         new_data_stats[symbol] = count
         total_new += count
         logger.info(f"  {symbol}: {count} nouvelles lignes")
@@ -128,16 +131,14 @@ def update_training_marker(**context):
     now = datetime.now(timezone.utc)
     db["ml_metadata"].update_one(
         {"_id": "last_training"},
-        {"$set": {
-            "timestamp": now,
-            "execution_date": str(context.get("execution_date", "")),
-            "total_new_data": context["ti"].xcom_pull(
-                task_ids="check_new_data", key="total_new"
-            ),
-            "total_all_data": context["ti"].xcom_pull(
-                task_ids="check_new_data", key="total_all"
-            ),
-        }},
+        {
+            "$set": {
+                "timestamp": now,
+                "execution_date": str(context.get("execution_date", "")),
+                "total_new_data": context["ti"].xcom_pull(task_ids="check_new_data", key="total_new"),
+                "total_all_data": context["ti"].xcom_pull(task_ids="check_new_data", key="total_all"),
+            }
+        },
         upsert=True,
     )
     client.close()
@@ -185,7 +186,7 @@ def log_training_summary(**context):
 
     # Services
     summary.append("📡 Résultats disponibles sur:")
-    summary.append(f"  • MLflow UI: http://localhost:5001")
+    summary.append("  • MLflow UI: http://localhost:5001")
     summary.append("")
     summary.append("=" * 60)
 
@@ -301,7 +302,8 @@ curr_df = df.iloc[split:]
 detector = DataDriftDetector()
 report = detector.generate_drift_report(ref_df, curr_df, fnames)
 detector.log_drift_to_mlflow(report)
-print(f'Drift: {report["overall_drift_level"]} | {report["drifted_features_count"]}/{report["total_features"]} features drifted')
+print(f'Drift: {report["overall_drift_level"]} | '
+      f'{report["drifted_features_count"]}/{report["total_features"]} features drifted')
 PYEOF
 """,
         execution_timeout=timedelta(minutes=30),

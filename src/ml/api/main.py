@@ -13,7 +13,7 @@ import os
 import logging
 import sys
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 # Add src to path for local imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,18 @@ logger = logging.getLogger(__name__)
 # PYDANTIC SCHEMAS
 # ============================================
 
+
 class PredictRequest(BaseModel):
     """Request body for /predict endpoint."""
+
     symbol: str = Field(default="BTCUSDT", description="Trading pair")
     interval: str = Field(default="1m", description="Candle interval")
     limit: int = Field(default=200, ge=50, le=5000, description="Number of candles")
 
+
 class PredictResponse(BaseModel):
     """Response for /predict endpoint."""
+
     symbol: str
     interval: str
     direction: str  # "UP" or "DOWN"
@@ -46,20 +50,26 @@ class PredictResponse(BaseModel):
     samples_analyzed: int
     timestamp: str
 
+
 class AnomalyRequest(BaseModel):
     """Request body for /anomalies endpoint."""
+
     symbol: str = Field(default="BTCUSDT", description="Trading pair")
     interval: str = Field(default="1m", description="Candle interval")
     limit: int = Field(default=300, ge=50, le=5000, description="Number of candles")
 
+
 class AnomalyItem(BaseModel):
     """Single anomaly detection result."""
+
     index: int
     is_anomaly: bool
     anomaly_score: float
 
+
 class AnomalyResponse(BaseModel):
     """Response for /anomalies endpoint."""
+
     symbol: str
     interval: str
     total_points: int
@@ -69,22 +79,28 @@ class AnomalyResponse(BaseModel):
     timestamp: str
     results: List[AnomalyItem]
 
+
 class HealthResponse(BaseModel):
     """Response for /health endpoint."""
+
     status: str
     service: str
     version: str
     timestamp: str
     checks: Dict[str, str]
 
+
 class ModelInfo(BaseModel):
     """Model information for /models endpoint."""
+
     name: str
     latest_version: Optional[str] = None
     description: str = ""
 
+
 class ModelsResponse(BaseModel):
     """Response for /models endpoint."""
+
     models: List[ModelInfo]
     timestamp: str
 
@@ -104,10 +120,8 @@ def _get_mongodb_client():
     """Lazy MongoDB connection (only when endpoint is called)."""
     try:
         from pymongo import MongoClient
-        uri = os.getenv(
-            "MONGODB_URI",
-            "mongodb://datamlops:datamlops123@localhost:27017/cryptomarket?authSource=admin"
-        )
+
+        uri = os.getenv("MONGODB_URI", "mongodb://datamlops:datamlops123@localhost:27017/cryptomarket?authSource=admin")
         client = MongoClient(uri, serverSelectionTimeoutMS=3000)
         return client
     except Exception:
@@ -119,6 +133,7 @@ def _get_mlflow_client():
     try:
         from mlflow.tracking import MlflowClient
         import mlflow
+
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
         mlflow.set_tracking_uri(tracking_uri)
         return MlflowClient(tracking_uri)
@@ -126,9 +141,7 @@ def _get_mlflow_client():
         return None
 
 
-def _fetch_ohlcv_from_mongo(
-    symbol: str, interval: str, limit: int
-) -> Optional[pd.DataFrame]:
+def _fetch_ohlcv_from_mongo(symbol: str, interval: str, limit: int) -> Optional[pd.DataFrame]:
     """Fetches OHLCV data from MongoDB (core columns only)."""
     client = _get_mongodb_client()
     if client is None:
@@ -140,8 +153,15 @@ def _fetch_ohlcv_from_mongo(
 
         # Project only core OHLCV columns to avoid NaN contamination
         projection = {
-            "_id": 0, "symbol": 1, "interval": 1, "timestamp": 1,
-            "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1,
+            "_id": 0,
+            "symbol": 1,
+            "interval": 1,
+            "timestamp": 1,
+            "open": 1,
+            "high": 1,
+            "low": 1,
+            "close": 1,
+            "volume": 1,
         }
         cursor = collection.find(
             {"symbol": symbol.upper(), "interval": interval},
@@ -174,21 +194,24 @@ def _generate_synthetic_ohlcv(symbol: str, n: int = 500) -> pd.DataFrame:
     close = base_price * np.cumprod(1 + returns)
     noise = np.random.uniform(0.001, 0.005, n)
 
-    return pd.DataFrame({
-        "symbol": symbol,
-        "interval": "1m",
-        "timestamp": timestamps,
-        "open": close * (1 - noise),
-        "high": close * (1 + np.random.uniform(0, 0.003, n)),
-        "low": close * (1 - np.random.uniform(0, 0.003, n)),
-        "close": close,
-        "volume": np.random.uniform(50, 500, n),
-    })
+    return pd.DataFrame(
+        {
+            "symbol": symbol,
+            "interval": "1m",
+            "timestamp": timestamps,
+            "open": close * (1 - noise),
+            "high": close * (1 + np.random.uniform(0, 0.003, n)),
+            "low": close * (1 - np.random.uniform(0, 0.003, n)),
+            "close": close,
+            "volume": np.random.uniform(50, 500, n),
+        }
+    )
 
 
 # ============================================
 # ENDPOINTS
 # ============================================
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -267,8 +290,7 @@ async def predict(request: PredictRequest):
         X_train, X_test, y_train, y_test = predictor.prepare_data(df, feature_names)
 
         model, metrics = predictor.train_xgboost(
-            X_train, y_train, X_test, y_test,
-            params={"n_estimators": 50, "max_depth": 4}
+            X_train, y_train, X_test, y_test, params={"n_estimators": 50, "max_depth": 4}
         )
 
         # Predict on the last data point
@@ -333,11 +355,13 @@ async def detect_anomalies(request: AnomalyRequest):
         # Build results
         results = []
         for i in range(len(preds)):
-            results.append(AnomalyItem(
-                index=i,
-                is_anomaly=bool(preds[i] == 1),
-                anomaly_score=round(float(scores[i]), 6),
-            ))
+            results.append(
+                AnomalyItem(
+                    index=i,
+                    is_anomaly=bool(preds[i] == 1),
+                    anomaly_score=round(float(scores[i]), 6),
+                )
+            )
 
         anomalies_count = int(preds.sum())
     except Exception as e:
@@ -370,11 +394,13 @@ async def list_models():
                 latest_version = None
                 if rm.latest_versions:
                     latest_version = rm.latest_versions[0].version
-                models.append(ModelInfo(
-                    name=rm.name,
-                    latest_version=str(latest_version) if latest_version else None,
-                    description=rm.description or "",
-                ))
+                models.append(
+                    ModelInfo(
+                        name=rm.name,
+                        latest_version=str(latest_version) if latest_version else None,
+                        description=rm.description or "",
+                    )
+                )
         except Exception as e:
             logger.warning(f"MLflow registry query failed: {e}")
 

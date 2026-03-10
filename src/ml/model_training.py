@@ -25,13 +25,10 @@ from typing import Dict, List, Optional, Tuple, Any
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    classification_report
-)
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from xgboost import XGBClassifier
 
-from .config import model_config, feature_config
+from .config import model_config
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +39,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 def _import_tensorflow():
     """Lazy import TensorFlow to avoid slow startup when not needed."""
     import tensorflow as tf
+
     return tf
 
 
@@ -57,12 +55,7 @@ class CryptoPricePredictor:
         - Comparison: train both, pick the best by F1 score
     """
 
-    def __init__(
-        self,
-        test_size: float = 0.2,
-        random_state: int = 42,
-        sequence_length: int = 10
-    ):
+    def __init__(self, test_size: float = 0.2, random_state: int = 42, sequence_length: int = 10):
         """
         Args:
             test_size:       Fraction for test split (default 0.2)
@@ -79,10 +72,7 @@ class CryptoPricePredictor:
     # ------------------------------------------------------------------
 
     def prepare_data(
-        self,
-        df: pd.DataFrame,
-        feature_names: List[str],
-        target_col: str = "target_direction"
+        self, df: pd.DataFrame, feature_names: List[str], target_col: str = "target_direction"
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Splits and scales data for model training.
@@ -97,14 +87,22 @@ class CryptoPricePredictor:
         """
         logger.info("Preparing data for training...")
 
-        X = df[feature_names].values
+        # Select feature columns and encode any string/categorical columns
+        X_df = df[feature_names].copy()
+        for col in X_df.columns:
+            if X_df[col].dtype == object:
+                logger.info(f"  Encoding categorical column: {col} " f"(unique: {X_df[col].nunique()})")
+                X_df[col] = pd.Categorical(X_df[col]).codes  # str → int (0, 1, 2…)
+
+        X = X_df.values.astype(np.float64)
         y = df[target_col].values
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
+            X,
+            y,
             test_size=self.test_size,
             random_state=self.random_state,
-            shuffle=False  # time-series: no shuffle to preserve order
+            shuffle=False,  # time-series: no shuffle to preserve order
         )
 
         # Scale features
@@ -118,11 +116,7 @@ class CryptoPricePredictor:
         return X_train, X_test, y_train, y_test
 
     @staticmethod
-    def create_sequences(
-        X: np.ndarray,
-        y: np.ndarray,
-        seq_length: int = 10
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    def create_sequences(X: np.ndarray, y: np.ndarray, seq_length: int = 10) -> Tuple[np.ndarray, np.ndarray]:
         """
         Creates sliding-window sequences for LSTM input.
 
@@ -136,7 +130,7 @@ class CryptoPricePredictor:
         """
         X_seq, y_seq = [], []
         for i in range(seq_length, len(X)):
-            X_seq.append(X[i - seq_length:i])
+            X_seq.append(X[i - seq_length : i])
             y_seq.append(y[i])
 
         return np.array(X_seq), np.array(y_seq)
@@ -151,7 +145,7 @@ class CryptoPricePredictor:
         y_train: np.ndarray,
         X_test: np.ndarray,
         y_test: np.ndarray,
-        params: Optional[Dict] = None
+        params: Optional[Dict] = None,
     ) -> Tuple[XGBClassifier, Dict[str, float]]:
         """
         Trains an XGBoost classifier for price direction.
@@ -182,7 +176,8 @@ class CryptoPricePredictor:
 
         model = XGBClassifier(**default_params)
         model.fit(
-            X_train, y_train,
+            X_train,
+            y_train,
             eval_set=[(X_test, y_test)],
             verbose=False,
         )
@@ -208,7 +203,7 @@ class CryptoPricePredictor:
         y_train: np.ndarray,
         X_test: np.ndarray,
         y_test: np.ndarray,
-        epochs: int = 50,
+        epochs: int = 30,
         batch_size: int = 32,
     ) -> Tuple[Any, Dict[str, float]]:
         """
@@ -232,13 +227,17 @@ class CryptoPricePredictor:
 
         tf = _import_tensorflow()
 
+        # Prevent TF from pre-allocating all GPU memory
+        tf.keras.backend.clear_session()
+        for gpu in tf.config.list_physical_devices("GPU"):
+            try:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            except RuntimeError:
+                pass  # Already initialized
+
         # Create sequences
-        X_train_seq, y_train_seq = self.create_sequences(
-            X_train, y_train, self.sequence_length
-        )
-        X_test_seq, y_test_seq = self.create_sequences(
-            X_test, y_test, self.sequence_length
-        )
+        X_train_seq, y_train_seq = self.create_sequences(X_train, y_train, self.sequence_length)
+        X_test_seq, y_test_seq = self.create_sequences(X_test, y_test, self.sequence_length)
 
         if len(X_train_seq) == 0 or len(X_test_seq) == 0:
             logger.error("Not enough data to create sequences")
@@ -247,15 +246,17 @@ class CryptoPricePredictor:
         n_features = X_train_seq.shape[2]
         logger.info(f"  Sequence shape: {X_train_seq.shape}")
 
-        # Build model
-        model = tf.keras.Sequential([
-            tf.keras.layers.Input(shape=(self.sequence_length, n_features)),
-            tf.keras.layers.LSTM(64, return_sequences=True),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.LSTM(32, return_sequences=False),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(1, activation="sigmoid"),
-        ])
+        # Build model — reduced units (32/16) to halve memory vs 64/32
+        model = tf.keras.Sequential(
+            [
+                tf.keras.layers.Input(shape=(self.sequence_length, n_features)),
+                tf.keras.layers.LSTM(32, return_sequences=True),
+                tf.keras.layers.Dropout(0.2),
+                tf.keras.layers.LSTM(16, return_sequences=False),
+                tf.keras.layers.Dropout(0.2),
+                tf.keras.layers.Dense(1, activation="sigmoid"),
+            ]
+        )
 
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
@@ -265,7 +266,8 @@ class CryptoPricePredictor:
 
         # Train
         model.fit(
-            X_train_seq, y_train_seq,
+            X_train_seq,
+            y_train_seq,
             epochs=epochs,
             batch_size=batch_size,
             validation_data=(X_test_seq, y_test_seq),
@@ -302,12 +304,7 @@ class CryptoPricePredictor:
     # PREDICTION
     # ------------------------------------------------------------------
 
-    def predict(
-        self,
-        model: Any,
-        X: np.ndarray,
-        model_type: str = "xgboost"
-    ) -> np.ndarray:
+    def predict(self, model: Any, X: np.ndarray, model_type: str = "xgboost") -> np.ndarray:
         """
         Generates predictions using a trained model.
 
@@ -322,9 +319,7 @@ class CryptoPricePredictor:
         if model_type == "xgboost":
             return model.predict(X)
         elif model_type == "lstm":
-            X_seq, _ = self.create_sequences(
-                X, np.zeros(len(X)), self.sequence_length
-            )
+            X_seq, _ = self.create_sequences(X, np.zeros(len(X)), self.sequence_length)
             if len(X_seq) == 0:
                 return np.array([])
             proba = model.predict(X_seq, verbose=0).flatten()
@@ -342,7 +337,7 @@ class CryptoPricePredictor:
         model_type: str,
         params: Dict[str, Any],
         metrics: Dict[str, float],
-        feature_names: Optional[List[str]] = None
+        feature_names: Optional[List[str]] = None,
     ) -> Optional[str]:
         """
         Logs model, parameters, and metrics to MLflow.
@@ -384,7 +379,9 @@ class CryptoPricePredictor:
                         mlflow.keras.log_model(model, "model")
                 except Exception as model_err:
                     logger.warning(f"Native log_model failed ({model_err}), using joblib fallback")
-                    import tempfile, joblib as _joblib
+                    import tempfile
+                    import joblib as _joblib
+
                     with tempfile.TemporaryDirectory() as tmpdir:
                         path = f"{tmpdir}/{model_type}_model.joblib"
                         _joblib.dump(model, path)
@@ -392,10 +389,7 @@ class CryptoPricePredictor:
 
                 # Log feature names
                 if feature_names:
-                    mlflow.log_text(
-                        json.dumps(feature_names, indent=2),
-                        "feature_names.json"
-                    )
+                    mlflow.log_text(json.dumps(feature_names, indent=2), "feature_names.json")
 
                 run_id = mlflow.active_run().info.run_id
                 logger.info(f"  ✅ Logged to MLflow (run_id: {run_id})")
@@ -483,9 +477,9 @@ class CryptoPricePredictor:
         feature_names: List[str],
         target_col: str = "target_direction",
         xgboost_params: Optional[Dict] = None,
-        lstm_epochs: int = 50,
+        lstm_epochs: int = 30,
         lstm_batch_size: int = 32,
-        log_mlflow: bool = False
+        log_mlflow: bool = False,
     ) -> Dict[str, Any]:
         """
         Trains both XGBoost and LSTM, compares them, returns the results.
@@ -508,19 +502,14 @@ class CryptoPricePredictor:
         logger.info("=" * 60)
 
         # Prepare data
-        X_train, X_test, y_train, y_test = self.prepare_data(
-            df, feature_names, target_col
-        )
+        X_train, X_test, y_train, y_test = self.prepare_data(df, feature_names, target_col)
 
         # Train XGBoost
-        xgb_model, xgb_metrics = self.train_xgboost(
-            X_train, y_train, X_test, y_test, xgboost_params
-        )
+        xgb_model, xgb_metrics = self.train_xgboost(X_train, y_train, X_test, y_test, xgboost_params)
 
         # Train LSTM
         lstm_model, lstm_metrics = self.train_lstm(
-            X_train, y_train, X_test, y_test,
-            epochs=lstm_epochs, batch_size=lstm_batch_size
+            X_train, y_train, X_test, y_test, epochs=lstm_epochs, batch_size=lstm_batch_size
         )
 
         # Compare by F1 score
@@ -538,16 +527,21 @@ class CryptoPricePredictor:
         # Log to MLflow
         if log_mlflow:
             xgb_params = xgboost_params or {
-                "max_depth": 6, "n_estimators": 100,
-                "learning_rate": 0.1, "model_type": "xgboost"
+                "max_depth": 6,
+                "n_estimators": 100,
+                "learning_rate": 0.1,
+                "model_type": "xgboost",
             }
             self.log_to_mlflow(xgb_model, "xgboost", xgb_params, xgb_metrics, feature_names)
 
             lstm_params = {
                 "sequence_length": self.sequence_length,
-                "epochs": lstm_epochs, "batch_size": lstm_batch_size,
-                "lstm_units_1": 64, "lstm_units_2": 32,
-                "dropout": 0.2, "model_type": "lstm"
+                "epochs": lstm_epochs,
+                "batch_size": lstm_batch_size,
+                "lstm_units_1": 64,
+                "lstm_units_2": 32,
+                "dropout": 0.2,
+                "model_type": "lstm",
             }
             self.log_to_mlflow(lstm_model, "lstm", lstm_params, lstm_metrics, feature_names)
 

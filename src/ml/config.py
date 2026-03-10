@@ -11,19 +11,19 @@ from typing import List
 @dataclass
 class MongoDBConfig:
     """MongoDB connection configuration for ML module"""
+
     uri: str = os.getenv(
-        'MONGODB_URI',
-        'mongodb://datamlops:datamlops123@localhost:27017/cryptomarket?authSource=admin'
+        "MONGODB_URI", "mongodb://datamlops:datamlops123@localhost:27017/cryptomarket?authSource=admin"
     )
-    database: str = 'cryptomarket'
+    database: str = "cryptomarket"
 
     # Source collections (read from P3 output)
-    ohlcv_collection: str = 'ohlcv'
-    indicators_collection: str = 'indicators'
+    ohlcv_collection: str = "ohlcv"
+    indicators_collection: str = "indicators"
 
     # Target collections (written by P4)
-    predictions_collection: str = 'predictions'
-    anomalies_collection: str = 'anomalies'
+    predictions_collection: str = "predictions"
+    anomalies_collection: str = "anomalies"
 
 
 @dataclass
@@ -44,47 +44,47 @@ class FeatureConfig:
     rsi_overbought: float = 70.0
 
     # Target variable config
-    prediction_horizon: int = 5        # Predict N candles ahead
-    anomaly_return_threshold: float = 0.03   # 3% return → anomaly
+    prediction_horizon: int = 5  # Predict N candles ahead
+    anomaly_return_threshold: float = 0.03  # 3% return → anomaly
 
     # Columns that are metadata (excluded from feature matrix)
-    metadata_columns: List[str] = field(default_factory=lambda: [
-        'symbol', 'interval', 'timestamp', '_id'
-    ])
+    metadata_columns: List[str] = field(default_factory=lambda: ["symbol", "interval", "timestamp", "_id"])
 
     # Target column names
-    target_columns: List[str] = field(default_factory=lambda: [
-        'target_direction', 'target_return_pct', 'anomaly_label'
-    ])
+    target_columns: List[str] = field(
+        default_factory=lambda: ["target_direction", "target_return_pct", "anomaly_label"]
+    )
 
 
 @dataclass
 class AnomalyConfig:
     """Anomaly detection model parameters"""
+
     # Isolation Forest
-    contamination: float = 0.05          # Expected anomaly ratio
-    n_estimators: int = 100              # Number of trees
+    contamination: float = 0.05  # Expected anomaly ratio
+    n_estimators: int = 100  # Number of trees
 
     # Autoencoder
     autoencoder_epochs: int = 50
     autoencoder_batch_size: int = 32
-    autoencoder_latent_dim: int = 8      # Bottleneck dimension
+    autoencoder_latent_dim: int = 8  # Bottleneck dimension
     reconstruction_threshold_percentile: float = 95.0  # Percentile cutoff
 
     # MLflow
-    experiment_name: str = 'crypto-anomaly-detection'
+    experiment_name: str = "crypto-anomaly-detection"
 
 
 @dataclass
 class ModelConfig:
     """Model training and serving configuration"""
-    mlflow_tracking_uri: str = os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:5001')
-    experiment_name: str = 'crypto-price-prediction'
-    model_name: str = 'crypto-predictor'
+
+    mlflow_tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001")
+    experiment_name: str = "crypto-price-prediction"
+    model_name: str = "crypto-predictor"
 
     # Default training symbols
-    symbols: List[str] = field(default_factory=lambda: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT'])
-    default_interval: str = '1m'
+    symbols: List[str] = field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "BNBUSDT"])
+    default_interval: str = "1m"
     default_data_limit: int = 5000
 
 

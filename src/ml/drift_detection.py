@@ -13,7 +13,7 @@ Usage:
 import logging
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from scipy import stats
 from datetime import datetime, timezone
 
@@ -158,8 +158,21 @@ class DataDriftDetector:
                 logger.warning(f"Feature '{feat}' missing from one of the datasets")
                 continue
 
-            ref_vals = ref_df[feat].dropna().values.astype(float)
-            curr_vals = curr_df[feat].dropna().values.astype(float)
+            ref_series = ref_df[feat].dropna()
+            curr_series = curr_df[feat].dropna()
+
+            # Encode string/categorical columns as integer codes before float cast
+            if ref_series.dtype == object or str(ref_series.dtype) == "category":
+                all_cats = pd.Categorical(pd.concat([ref_series, curr_series], ignore_index=True))
+                ref_series = pd.Series(pd.Categorical(ref_series, categories=all_cats.categories).codes)
+                curr_series = pd.Series(pd.Categorical(curr_series, categories=all_cats.categories).codes)
+
+            try:
+                ref_vals = ref_series.values.astype(float)
+                curr_vals = curr_series.values.astype(float)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Skipping feature '{feat}': cannot convert to float ({e})")
+                continue
 
             if len(ref_vals) == 0 or len(curr_vals) == 0:
                 continue
@@ -257,9 +270,7 @@ class DataDriftDetector:
 
         # Overall metrics
         psi_values = [v["psi"] for v in feature_drift.values()]
-        drifted_features = [
-            k for k, v in feature_drift.items() if v["is_drifted"]
-        ]
+        drifted_features = [k for k, v in feature_drift.items() if v["is_drifted"]]
 
         overall_psi = float(np.mean(psi_values)) if psi_values else 0.0
         drift_ratio = len(drifted_features) / len(features) if features else 0.0
@@ -286,9 +297,7 @@ class DataDriftDetector:
 
         # Prediction drift (optional)
         if ref_preds is not None and curr_preds is not None:
-            report["prediction_drift"] = self.detect_prediction_drift(
-                ref_preds, curr_preds
-            )
+            report["prediction_drift"] = self.detect_prediction_drift(ref_preds, curr_preds)
 
         logger.info(
             f"Drift report: {len(drifted_features)}/{len(features)} features drifted, "
@@ -324,18 +333,18 @@ class DataDriftDetector:
             mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment(experiment_name)
 
-            with mlflow.start_run(
-                run_name=f"drift_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            ):
+            with mlflow.start_run(run_name=f"drift_check_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
                 # Overall metrics
-                mlflow.log_metrics({
-                    "overall_psi": report["overall_psi"],
-                    "drift_ratio": report["drift_ratio"],
-                    "drifted_features_count": report["drifted_features_count"],
-                    "total_features": report["total_features"],
-                    "reference_samples": report["reference_samples"],
-                    "current_samples": report["current_samples"],
-                })
+                mlflow.log_metrics(
+                    {
+                        "overall_psi": report["overall_psi"],
+                        "drift_ratio": report["drift_ratio"],
+                        "drifted_features_count": report["drifted_features_count"],
+                        "total_features": report["total_features"],
+                        "reference_samples": report["reference_samples"],
+                        "current_samples": report["current_samples"],
+                    }
+                )
 
                 # Per-feature PSI (top drifted)
                 feature_details = report.get("feature_details", {})
@@ -345,16 +354,20 @@ class DataDriftDetector:
                 # Prediction drift if available
                 pred_drift = report.get("prediction_drift")
                 if pred_drift:
-                    mlflow.log_metrics({
-                        "prediction_psi": pred_drift["psi"],
-                        "prediction_ks_statistic": pred_drift["ks_statistic"],
-                    })
+                    mlflow.log_metrics(
+                        {
+                            "prediction_psi": pred_drift["psi"],
+                            "prediction_ks_statistic": pred_drift["ks_statistic"],
+                        }
+                    )
 
                 # Tags
-                mlflow.set_tags({
-                    "drift_level": report["overall_drift_level"],
-                    "task": "drift_monitoring",
-                })
+                mlflow.set_tags(
+                    {
+                        "drift_level": report["overall_drift_level"],
+                        "task": "drift_monitoring",
+                    }
+                )
 
                 run_id = mlflow.active_run().info.run_id
                 logger.info(f"Drift report logged to MLflow (run: {run_id})")

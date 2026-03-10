@@ -59,6 +59,30 @@ services:
       - datamlops-network
 
   # ============================================
+  # CONFLUENT SCHEMA REGISTRY (required by DataHub)
+  # ============================================
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: schema-registry
+    hostname: schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/subjects" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - datamlops-network
+
+  # ============================================
   # BINANCE STREAMING (P2)
   # ============================================
   binance-streaming:
@@ -123,6 +147,8 @@ services:
     container_name: spark-master
     environment:
       - SPARK_MODE=master
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
     ports:
       - "8080:8080"
       - "7077:7077"
@@ -145,6 +171,8 @@ services:
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=2G
       - SPARK_WORKER_CORES=2
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
     volumes:
       - ../src:/opt/spark/work-dir/src
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
@@ -244,6 +272,11 @@ services:
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MONGODB_URI=mongodb://datamlops:datamlops123@mongodb:27017/cryptomarket?authSource=admin
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - TF_CPP_MIN_LOG_LEVEL=2
+      - GIT_PYTHON_REFRESH=quiet
+    mem_limit: 4g
+    memswap_limit: 4g
     volumes:
       - ../src:/app/src
       - ../tests:/app/tests
@@ -251,6 +284,8 @@ services:
     depends_on:
       - mlflow
       - mongodb
+    command: [ "sleep", "infinity" ]
+    restart: unless-stopped
     networks:
       - datamlops-network
 
@@ -348,7 +383,7 @@ services:
       - EBEAN_DATASOURCE_URL=jdbc:mysql://datahub-mysql:3306/datahub?verifyServerCertificate=false&useSSL=true&useUnicode=yes&characterEncoding=UTF-8
       - EBEAN_DATASOURCE_DRIVER=com.mysql.cj.jdbc.Driver
       - KAFKA_BOOTSTRAP_SERVER=kafka:9092
-      - KAFKA_SCHEMAREGISTRY_URL=http://datahub-gms:8080/schema-registry/api/
+      - KAFKA_SCHEMAREGISTRY_URL=http://schema-registry:8081/
       - ELASTICSEARCH_HOST=datahub-elasticsearch
       - ELASTICSEARCH_PORT=9200
       - GRAPH_SERVICE_IMPL=elasticsearch
@@ -360,8 +395,8 @@ services:
         condition: service_healthy
       datahub-elasticsearch:
         condition: service_healthy
-      kafka:
-        condition: service_started
+      schema-registry:
+        condition: service_healthy
     networks:
       - datamlops-network
 
@@ -378,7 +413,7 @@ services:
       - EBEAN_DATASOURCE_URL=jdbc:mysql://datahub-mysql:3306/datahub?verifyServerCertificate=false&useSSL=true&useUnicode=yes&characterEncoding=UTF-8
       - EBEAN_DATASOURCE_DRIVER=com.mysql.cj.jdbc.Driver
       - KAFKA_BOOTSTRAP_SERVER=kafka:9092
-      - KAFKA_SCHEMAREGISTRY_URL=http://datahub-gms:8080/schema-registry/api/
+      - KAFKA_SCHEMAREGISTRY_URL=http://schema-registry:8081/
       - ELASTICSEARCH_HOST=datahub-elasticsearch
       - ELASTICSEARCH_PORT=9200
       - GRAPH_SERVICE_IMPL=elasticsearch
@@ -392,8 +427,8 @@ services:
         condition: service_healthy
       datahub-elasticsearch:
         condition: service_healthy
-      kafka:
-        condition: service_started
+      schema-registry:
+        condition: service_healthy
     networks:
       - datamlops-network
 
