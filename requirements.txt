@@ -48,7 +48,8 @@ pytest-cov==4.1.0
 
 # Utils
 python-dotenv==1.0.0
-requests==2.32.3pydantic==2.5.3
+requests==2.32.3
+pydantic==2.5.3
 kafka-python-ng
 
 # DataHub (ingestion)
