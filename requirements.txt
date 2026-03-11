@@ -1,5 +1,6 @@
 # Requirements principales - Projet Crypto Binance
 # Installer avec: pip install -r requirements.txt
+# NOTE: Pour le CI/CD, utiliser requirements-ci.txt (sans les deps Docker-only)
 
 # Binance API
 python-binance==1.0.19
@@ -8,11 +9,12 @@ websocket-client==1.7.0
 # Kafka
 kafka-python==2.0.2
 confluent-kafka==2.3.0
+kafka-python-ng==2.2.3
 
-# Spark
+# Spark (Docker-only — not needed for CI unit tests)
 pyspark==3.5.0
-apache-airflow-providers-apache-spark
-apache-airflow-providers-apache-kafka
+apache-airflow-providers-apache-spark==5.2.1
+apache-airflow-providers-apache-kafka==1.10.0
 
 # MongoDB
 pymongo==4.6.1
@@ -49,8 +51,6 @@ pytest-cov==4.1.0
 # Utils
 python-dotenv==1.0.0
 requests==2.32.3
-pydantic==2.5.3
-kafka-python-ng
 
-# DataHub (ingestion)
-acryl-datahub>=0.13.0
+# DataHub (ingestion — Docker-only)
+acryl-datahub==1.0.0

@@ -69,13 +69,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-test-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-test-${{ hashFiles('requirements-ci.txt') }}
           restore-keys: ${{ runner.os }}-pip-test-
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-ci.txt
 
       - name: Run unit tests (excluding integration)
         run: |
@@ -114,13 +114,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-dags-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-dags-${{ hashFiles('requirements-ci.txt') }}
           restore-keys: ${{ runner.os }}-pip-dags-
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-ci.txt
 
       - name: Validate all DAGs load correctly
         run: |
