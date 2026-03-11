@@ -12,6 +12,7 @@ from typing import Dict, List
 @dataclass
 class DataHubConfig:
     """DataHub GMS connection settings."""
+
     gms_server: str = os.getenv("DATAHUB_GMS_URL", "http://localhost:8082")
     environment: str = "PROD"
 
@@ -19,10 +20,11 @@ class DataHubConfig:
 @dataclass
 class PlatformConfig:
     """Platform identifiers used in DataHub URNs."""
+
     kafka: str = "kafka"
     spark: str = "spark"
     mongodb: str = "mongodb"
-    ml: str = "mlflow"   # ML models platform
+    ml: str = "mlflow"  # ML models platform
 
 
 @dataclass
@@ -40,36 +42,44 @@ class LineageConfig:
     platforms: PlatformConfig = field(default_factory=PlatformConfig)
 
     # ── Kafka Topics ──────────────────────────────────────────────
-    kafka_topics: List[str] = field(default_factory=lambda: [
-        "raw_trades",
-        "raw_klines",
-        "processed_data",
-        "anomalies",
-    ])
+    kafka_topics: List[str] = field(
+        default_factory=lambda: [
+            "raw_trades",
+            "raw_klines",
+            "processed_data",
+            "anomalies",
+        ]
+    )
 
     # ── Spark Jobs (logical datasets) ─────────────────────────────
-    spark_jobs: Dict[str, str] = field(default_factory=lambda: {
-        "trades_cleaning":     "crypto_pipeline.trades_cleaning",
-        "ohlcv_processing":    "crypto_pipeline.ohlcv_processing",
-        "indicators_calc":     "crypto_pipeline.indicators_calculation",
-        "metrics_aggregation": "crypto_pipeline.metrics_aggregation",
-    })
+    spark_jobs: Dict[str, str] = field(
+        default_factory=lambda: {
+            "trades_cleaning": "crypto_pipeline.trades_cleaning",
+            "ohlcv_processing": "crypto_pipeline.ohlcv_processing",
+            "indicators_calc": "crypto_pipeline.indicators_calculation",
+            "metrics_aggregation": "crypto_pipeline.metrics_aggregation",
+        }
+    )
 
     # ── MongoDB Collections ───────────────────────────────────────
-    mongodb_collections: List[str] = field(default_factory=lambda: [
-        "cryptomarket.raw_trades",
-        "cryptomarket.ohlcv",
-        "cryptomarket.indicators",
-        "cryptomarket.anomalies",
-        "cryptomarket.predictions",
-    ])
+    mongodb_collections: List[str] = field(
+        default_factory=lambda: [
+            "cryptomarket.raw_trades",
+            "cryptomarket.ohlcv",
+            "cryptomarket.indicators",
+            "cryptomarket.anomalies",
+            "cryptomarket.predictions",
+        ]
+    )
 
     # ── ML Datasets (logical) ─────────────────────────────────────
-    ml_datasets: Dict[str, str] = field(default_factory=lambda: {
-        "feature_engineering": "crypto_ml.feature_engineering",
-        "xgboost_predictor":  "crypto_ml.xgboost_predictor",
-        "anomaly_detector":   "crypto_ml.anomaly_detector",
-    })
+    ml_datasets: Dict[str, str] = field(
+        default_factory=lambda: {
+            "feature_engineering": "crypto_ml.feature_engineering",
+            "xgboost_predictor": "crypto_ml.xgboost_predictor",
+            "anomaly_detector": "crypto_ml.anomaly_detector",
+        }
+    )
 
 
 # Global instance

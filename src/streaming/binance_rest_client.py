@@ -46,10 +46,7 @@ from .kafka_producer import BinanceKafkaProducer
 
 
 # Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -106,9 +103,7 @@ class BinanceRESTClient:
         }
 
         logger.info("🔧 Initialisation du Kafka Producer (REST client)...")
-        self.producer = BinanceKafkaProducer(
-            bootstrap_servers=kafka_bootstrap_servers
-        )
+        self.producer = BinanceKafkaProducer(bootstrap_servers=kafka_bootstrap_servers)
         logger.info("✅ BinanceRESTClient prêt")
 
     # ------------------------------------------------------------------
@@ -161,23 +156,23 @@ class BinanceRESTClient:
             "stream": stream_name,
             "data": {
                 "e": "kline",
-                "E": now_ms,        # timestamp de réception (now)
+                "E": now_ms,  # timestamp de réception (now)
                 "s": symbol.upper(),
                 "k": {
-                    "t": open_time_ms,          # kline open time
-                    "T": close_time_ms,         # kline close time
+                    "t": open_time_ms,  # kline open time
+                    "T": close_time_ms,  # kline close time
                     "s": symbol.upper(),
                     "i": interval,
-                    "o": str(kline[1]),         # open
-                    "h": str(kline[2]),         # high
-                    "l": str(kline[3]),         # low
-                    "c": str(kline[4]),         # close
-                    "v": str(kline[5]),         # volume
-                    "n": num_trades,            # number of trades
-                    "x": True,                  # kline is closed (historical = always closed)
-                    "q": str(kline[7]),         # quote asset volume
-                    "V": str(kline[9]),         # taker buy base volume
-                    "Q": str(kline[10]),        # taker buy quote volume
+                    "o": str(kline[1]),  # open
+                    "h": str(kline[2]),  # high
+                    "l": str(kline[3]),  # low
+                    "c": str(kline[4]),  # close
+                    "v": str(kline[5]),  # volume
+                    "n": num_trades,  # number of trades
+                    "x": True,  # kline is closed (historical = always closed)
+                    "q": str(kline[7]),  # quote asset volume
+                    "V": str(kline[9]),  # taker buy base volume
+                    "Q": str(kline[10]),  # taker buy quote volume
                 },
             },
             "received_at": received_at,
@@ -269,7 +264,7 @@ class BinanceRESTClient:
         end_ms: Optional[int] = self._iso_to_ms(end_time) if end_time else None
 
         total_published = 0
-        total_fetched = 0   # Compteur séparé pour la pagination (indépendant des succès Kafka)
+        total_fetched = 0  # Compteur séparé pour la pagination (indépendant des succès Kafka)
         current_start_ms = start_ms
 
         while True:
@@ -314,10 +309,7 @@ class BinanceRESTClient:
                 else:
                     self.stats["messages_failed"] += 1
 
-            logger.info(
-                f"📤 Lot publié: {len(klines)} klines | "
-                f"Total publié: {total_published} | symbol={symbol}"
-            )
+            logger.info(f"📤 Lot publié: {len(klines)} klines | " f"Total publié: {total_published} | symbol={symbol}")
 
             # Si moins que le batch_limit demandé sont retournées → on a tout récupéré
             if len(klines) < batch_limit:
@@ -408,18 +400,13 @@ class BinanceRESTClient:
                 return int(dt.timestamp() * 1000)
             except ValueError:
                 continue
-        raise ValueError(
-            f"Format de date non reconnu: '{iso_str}'. "
-            "Utiliser ISO 8601, ex: '2024-01-15T10:30:00Z'"
-        )
+        raise ValueError(f"Format de date non reconnu: '{iso_str}'. " "Utiliser ISO 8601, ex: '2024-01-15T10:30:00Z'")
 
     def _print_stats(self, symbol: str, interval: str):
         """Affiche les statistiques d'ingestion."""
         duration = None
         if self.stats["start_time"]:
-            duration = (
-                datetime.now(timezone.utc) - self.stats["start_time"]
-            ).total_seconds()
+            duration = (datetime.now(timezone.utc) - self.stats["start_time"]).total_seconds()
 
         logger.info("=" * 60)
         logger.info("📊 STATISTIQUES D'INGESTION REST → KAFKA")
@@ -451,6 +438,7 @@ class BinanceRESTClient:
 # ---------------------------------------------------------------------------
 # Fonction de test rapide
 # ---------------------------------------------------------------------------
+
 
 def test_rest_client():
     """

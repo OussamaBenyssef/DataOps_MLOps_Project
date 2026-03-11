@@ -3,7 +3,9 @@ source:
   config:
     connection:
       bootstrap: "kafka:9092"
-      schema_registry_url: "http://datahub-gms:8080/schema-registry/api/"
+    # Pas de schema_registry_url : on ingère uniquement les métadonnées des topics
+    # (pas de ConfluentSchemaRegistry = pas de dépendance grpc requise)
+    ignore_warnings_on_schema_type: true
 
 sink:
   type: datahub-rest

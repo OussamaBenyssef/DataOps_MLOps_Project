@@ -14,9 +14,8 @@ Usage:
 """
 
 import logging
-import os
 import pandas as pd
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -75,9 +74,7 @@ class MLflowModelRegistry:
         try:
             result = mlflow.register_model(model_uri, model_name)
             version = result.version
-            logger.info(
-                f"Registered model '{model_name}' v{version} from run {run_id}"
-            )
+            logger.info(f"Registered model '{model_name}' v{version} from run {run_id}")
             return version
         except Exception as e:
             logger.error(f"Failed to register model: {e}")
@@ -103,9 +100,7 @@ class MLflowModelRegistry:
             True if successful
         """
         try:
-            self.client.set_registered_model_alias(
-                name=model_name, alias="staging", version=version
-            )
+            self.client.set_registered_model_alias(name=model_name, alias="staging", version=version)
             logger.info(f"Model '{model_name}' v{version} -> @staging")
             return True
         except Exception as e:
@@ -136,20 +131,17 @@ class MLflowModelRegistry:
         # Validate if thresholds provided
         if min_f1 is not None or min_accuracy is not None:
             is_valid = self.validate_before_promotion(
-                model_name, version,
+                model_name,
+                version,
                 min_f1=min_f1,
                 min_accuracy=min_accuracy,
             )
             if not is_valid:
-                logger.warning(
-                    f"Model '{model_name}' v{version} failed validation — NOT promoted"
-                )
+                logger.warning(f"Model '{model_name}' v{version} failed validation — NOT promoted")
                 return False
 
         try:
-            self.client.set_registered_model_alias(
-                name=model_name, alias="production", version=version
-            )
+            self.client.set_registered_model_alias(name=model_name, alias="production", version=version)
             logger.info(f"Model '{model_name}' v{version} -> @production")
             return True
         except Exception as e:
@@ -195,9 +187,7 @@ class MLflowModelRegistry:
             if min_accuracy is not None:
                 actual_acc = metrics.get("accuracy", 0.0)
                 if actual_acc < min_accuracy:
-                    logger.warning(
-                        f"  Accuracy {actual_acc:.4f} < threshold {min_accuracy}"
-                    )
+                    logger.warning(f"  Accuracy {actual_acc:.4f} < threshold {min_accuracy}")
                     return False
                 logger.info(f"  Accuracy {actual_acc:.4f} >= {min_accuracy} ✓")
 
@@ -255,9 +245,7 @@ class MLflowModelRegistry:
             latest = max(versions, key=lambda v: int(v.version))
             model_uri = f"models:/{model_name}/{latest.version}"
             model = mlflow.pyfunc.load_model(model_uri)
-            logger.info(
-                f"Loaded latest model '{model_name}' v{latest.version}"
-            )
+            logger.info(f"Loaded latest model '{model_name}' v{latest.version}")
             return model
         except Exception as e:
             logger.warning(f"Failed to load latest model '{model_name}': {e}")
@@ -278,22 +266,22 @@ class MLflowModelRegistry:
             DataFrame with version, run_id, status, aliases, and creation_timestamp
         """
         try:
-            versions = self.client.search_model_versions(
-                f"name='{model_name}'"
-            )
+            versions = self.client.search_model_versions(f"name='{model_name}'")
             if not versions:
                 return pd.DataFrame()
 
             rows = []
             for v in versions:
-                rows.append({
-                    "version": v.version,
-                    "run_id": v.run_id,
-                    "status": v.status,
-                    "aliases": ", ".join(v.aliases) if v.aliases else "",
-                    "creation_timestamp": v.creation_timestamp,
-                    "description": v.description or "",
-                })
+                rows.append(
+                    {
+                        "version": v.version,
+                        "run_id": v.run_id,
+                        "status": v.status,
+                        "aliases": ", ".join(v.aliases) if v.aliases else "",
+                        "creation_timestamp": v.creation_timestamp,
+                        "description": v.description or "",
+                    }
+                )
 
             df = pd.DataFrame(rows)
             df = df.sort_values("version", key=lambda x: x.astype(int), ascending=False)
@@ -348,9 +336,7 @@ class MLflowModelRegistry:
             DataFrame with version, aliases, and all logged metrics
         """
         try:
-            versions = self.client.search_model_versions(
-                f"name='{model_name}'"
-            )
+            versions = self.client.search_model_versions(f"name='{model_name}'")
             if not versions:
                 return pd.DataFrame()
 
@@ -367,11 +353,13 @@ class MLflowModelRegistry:
                     row.update(run.data.metrics)
                     rows.append(row)
                 except Exception:
-                    rows.append({
-                        "version": v.version,
-                        "aliases": ", ".join(v.aliases) if v.aliases else "",
-                        "run_id": v.run_id,
-                    })
+                    rows.append(
+                        {
+                            "version": v.version,
+                            "aliases": ", ".join(v.aliases) if v.aliases else "",
+                            "run_id": v.run_id,
+                        }
+                    )
 
             df = pd.DataFrame(rows)
             if "f1" in df.columns:
@@ -417,19 +405,12 @@ class MLflowModelRegistry:
         """
         try:
             # Get current production version
-            prod_mv = self.client.get_model_version_by_alias(
-                model_name, "production"
-            )
+            prod_mv = self.client.get_model_version_by_alias(model_name, "production")
             current_version = int(prod_mv.version)
 
             # Find all versions
-            all_versions = self.client.search_model_versions(
-                f"name='{model_name}'"
-            )
-            previous_versions = [
-                v for v in all_versions
-                if int(v.version) < current_version
-            ]
+            all_versions = self.client.search_model_versions(f"name='{model_name}'")
+            previous_versions = [v for v in all_versions if int(v.version) < current_version]
 
             if not previous_versions:
                 logger.warning(f"No previous version to rollback to for '{model_name}'")
@@ -438,13 +419,8 @@ class MLflowModelRegistry:
             # Pick the highest version below current
             prev = max(previous_versions, key=lambda v: int(v.version))
 
-            self.client.set_registered_model_alias(
-                name=model_name, alias="production", version=prev.version
-            )
-            logger.info(
-                f"Rolled back '{model_name}' production: "
-                f"v{current_version} -> v{prev.version}"
-            )
+            self.client.set_registered_model_alias(name=model_name, alias="production", version=prev.version)
+            logger.info(f"Rolled back '{model_name}' production: " f"v{current_version} -> v{prev.version}")
             return True
         except Exception as e:
             logger.error(f"Rollback failed: {e}")
@@ -486,9 +462,7 @@ class MLflowModelRegistry:
         """
         try:
             # Add a tag for permanent audit trail
-            self.client.set_model_version_tag(
-                model_name, version, "archived", "true"
-            )
+            self.client.set_model_version_tag(model_name, version, "archived", "true")
             logger.info(f"Archived model '{model_name}' v{version}")
             return True
         except Exception as e:

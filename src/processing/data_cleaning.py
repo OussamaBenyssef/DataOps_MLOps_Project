@@ -14,9 +14,7 @@ import logging
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
-from pyspark.sql.types import (
-    StructType, StructField, StringType, DoubleType, LongType, IntegerType
-)
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, LongType, IntegerType
 
 try:
     from .config import CleaningConfig
@@ -27,20 +25,23 @@ logger = logging.getLogger(__name__)
 
 
 # Schéma des données OHLCV brutes reçues depuis Kafka
-RAW_OHLCV_SCHEMA = StructType([
-    StructField("symbol",    StringType(),    True),
-    StructField("interval",  StringType(),    True),
-    StructField("timestamp", LongType(),      True),   # epoch ms
-    StructField("open",      DoubleType(),    True),
-    StructField("high",      DoubleType(),    True),
-    StructField("low",       DoubleType(),    True),
-    StructField("close",     DoubleType(),    True),
-    StructField("volume",    DoubleType(),    True),
-    StructField("trades",    IntegerType(),   True),
-])
+RAW_OHLCV_SCHEMA = StructType(
+    [
+        StructField("symbol", StringType(), True),
+        StructField("interval", StringType(), True),
+        StructField("timestamp", LongType(), True),  # epoch ms
+        StructField("open", DoubleType(), True),
+        StructField("high", DoubleType(), True),
+        StructField("low", DoubleType(), True),
+        StructField("close", DoubleType(), True),
+        StructField("volume", DoubleType(), True),
+        StructField("trades", IntegerType(), True),
+    ]
+)
 
 
 # ─────────────────────── NULL HANDLING ─────────────────────────────────────
+
 
 def handle_null_values(df: DataFrame, config: CleaningConfig):
     """
@@ -75,6 +76,7 @@ def handle_null_values(df: DataFrame, config: CleaningConfig):
 
 # ─────────────────────── VALIDATION MÉTIER ─────────────────────────────────
 
+
 def validate_ohlcv_constraints(df: DataFrame, config: CleaningConfig):
     """
     Valide les contraintes métier des données OHLCV:
@@ -88,16 +90,16 @@ def validate_ohlcv_constraints(df: DataFrame, config: CleaningConfig):
         Tuple (DataFrame valide, DataFrame des rejets avec raison)
     """
     valid_condition = (
-        (F.col("open") > 0) &
-        (F.col("high") > 0) &
-        (F.col("low") > 0) &
-        (F.col("close") > 0) &
-        (F.col("high") >= F.col("low")) &
-        (F.col("high") >= F.col("open")) &
-        (F.col("high") >= F.col("close")) &
-        (F.col("low") <= F.col("open")) &
-        (F.col("low") <= F.col("close")) &
-        (F.col("volume") >= 0)
+        (F.col("open") > 0)
+        & (F.col("high") > 0)
+        & (F.col("low") > 0)
+        & (F.col("close") > 0)
+        & (F.col("high") >= F.col("low"))
+        & (F.col("high") >= F.col("open"))
+        & (F.col("high") >= F.col("close"))
+        & (F.col("low") <= F.col("open"))
+        & (F.col("low") <= F.col("close"))
+        & (F.col("volume") >= 0)
     )
 
     df_valid = df.filter(valid_condition)
@@ -119,10 +121,7 @@ def validate_trades_constraints(df: DataFrame, config: CleaningConfig):
     Returns:
         Tuple (DataFrame valide, DataFrame des rejets)
     """
-    valid_condition = (
-        (F.col("price") > 0) &
-        (F.col("quantity") > 0)
-    )
+    valid_condition = (F.col("price") > 0) & (F.col("quantity") > 0)
 
     df_valid = df.filter(valid_condition)
     df_rejected = df.filter(~valid_condition)
@@ -131,6 +130,7 @@ def validate_trades_constraints(df: DataFrame, config: CleaningConfig):
 
 
 # ─────────────────────── OUTLIER DETECTION ─────────────────────────────────
+
 
 def detect_outliers_zscore(df: DataFrame, config: CleaningConfig):
     """
@@ -141,10 +141,7 @@ def detect_outliers_zscore(df: DataFrame, config: CleaningConfig):
     Outlier si |Z-score| > zscore_threshold (default: 3.0)
     """
     # Calculer moyenne et écart-type globaux
-    stats = df.agg(
-        F.avg("close").alias("mean_close"),
-        F.stddev("close").alias("std_close")
-    ).first()
+    stats = df.agg(F.avg("close").alias("mean_close"), F.stddev("close").alias("std_close")).first()
 
     mean_close = stats["mean_close"]
     std_close = stats["std_close"]
@@ -153,16 +150,11 @@ def detect_outliers_zscore(df: DataFrame, config: CleaningConfig):
         logger.warning("⚠️ Écart-type nul — impossible de détecter les outliers")
         return df.withColumn("zscore_close", F.lit(0.0)).withColumn("is_outlier", F.lit(False))
 
-    df_flagged = (df
-        .withColumn("zscore_close",
-            F.round(F.abs((F.col("close") - F.lit(mean_close)) / F.lit(std_close)), 4)
-        )
-        .withColumn("is_outlier",
-            F.col("zscore_close") > F.lit(config.zscore_threshold)
-        )
-    )
+    df_flagged = df.withColumn(
+        "zscore_close", F.round(F.abs((F.col("close") - F.lit(mean_close)) / F.lit(std_close)), 4)
+    ).withColumn("is_outlier", F.col("zscore_close") > F.lit(config.zscore_threshold))
 
-    outlier_count = df_flagged.filter(F.col("is_outlier") == True).count()
+    outlier_count = df_flagged.filter(F.col("is_outlier")).count()
     if outlier_count > 0:
         logger.warning(f"⚠️ {outlier_count} outliers détectés (Z-score > {config.zscore_threshold})")
 
@@ -177,20 +169,16 @@ def detect_price_spikes(df: DataFrame, config: CleaningConfig):
     """
     w = Window.partitionBy("symbol", "interval").orderBy("timestamp")
 
-    df_spikes = (df
-        .withColumn("prev_close", F.lag("close", 1).over(w))
-        .withColumn("price_change_pct",
+    df_spikes = (
+        df.withColumn("prev_close", F.lag("close", 1).over(w))
+        .withColumn(
+            "price_change_pct",
             F.when(
                 F.col("prev_close").isNotNull() & (F.col("prev_close") > 0),
-                F.round(
-                    F.abs(F.col("close") - F.col("prev_close")) / F.col("prev_close"),
-                    6
-                )
-            ).otherwise(F.lit(0.0))
+                F.round(F.abs(F.col("close") - F.col("prev_close")) / F.col("prev_close"), 6),
+            ).otherwise(F.lit(0.0)),
         )
-        .withColumn("is_price_spike",
-            F.col("price_change_pct") > F.lit(config.price_spike_threshold)
-        )
+        .withColumn("is_price_spike", F.col("price_change_pct") > F.lit(config.price_spike_threshold))
         .drop("prev_close")
     )
 
@@ -198,6 +186,7 @@ def detect_price_spikes(df: DataFrame, config: CleaningConfig):
 
 
 # ─────────────────────── DEDUPLICATION ─────────────────────────────────────
+
 
 def deduplicate_ohlcv(df: DataFrame):
     """
@@ -207,15 +196,9 @@ def deduplicate_ohlcv(df: DataFrame):
     initial_count = df.count()
 
     # Window pour prendre la dernière version
-    w = (Window
-         .partitionBy("symbol", "interval", "timestamp")
-         .orderBy(F.desc("timestamp")))
+    w = Window.partitionBy("symbol", "interval", "timestamp").orderBy(F.desc("timestamp"))
 
-    df_dedup = (df
-        .withColumn("_rn", F.row_number().over(w))
-        .filter(F.col("_rn") == 1)
-        .drop("_rn")
-    )
+    df_dedup = df.withColumn("_rn", F.row_number().over(w)).filter(F.col("_rn") == 1).drop("_rn")
 
     removed = initial_count - df_dedup.count()
     if removed > 0:
@@ -226,27 +209,32 @@ def deduplicate_ohlcv(df: DataFrame):
 
 # ─────────────────────── NORMALISATION ─────────────────────────────────────
 
+
 def normalize_timestamp(df: DataFrame):
     """
     Convertit le timestamp epoch (ms) en colonne TimestampType standard.
+    Si le timestamp est déjà un TimestampType, on le copie directement.
     """
-    return df.withColumn(
-        "event_time",
-        (F.col("timestamp") / 1000).cast("timestamp")
-    )
+    from pyspark.sql.types import LongType as _LongType, IntegerType as _IntegerType
+
+    ts_type = df.schema["timestamp"].dataType
+    if isinstance(ts_type, (_LongType, _IntegerType)):
+        # Epoch ms → diviser par 1000 puis cast en timestamp
+        return df.withColumn("event_time", (F.col("timestamp") / 1000).cast("timestamp"))
+    else:
+        # Déjà un TimestampType — utiliser tel quel
+        return df.withColumn("event_time", F.col("timestamp"))
 
 
 def normalize_symbol(df: DataFrame):
     """
     Normalise le nom du symbole: MAJUSCULES + suppression espaces.
     """
-    return df.withColumn(
-        "symbol",
-        F.upper(F.trim(F.col("symbol")))
-    )
+    return df.withColumn("symbol", F.upper(F.trim(F.col("symbol"))))
 
 
 # ─────────────────────── PIPELINE COMPLET ──────────────────────────────────
+
 
 def clean_ohlcv_data(df: DataFrame, config: CleaningConfig):
     """
@@ -292,16 +280,16 @@ def clean_ohlcv_data(df: DataFrame, config: CleaningConfig):
 
     # 5. Détection outliers
     df_clean = detect_outliers_zscore(df_clean, config)
-    metrics["outliers_detected"] = df_clean.filter(F.col("is_outlier") == True).count()
+    metrics["outliers_detected"] = df_clean.filter(F.col("is_outlier")).count()
 
     # Métriques finales
     metrics["final_count"] = df_clean.count()
     if initial_count > 0:
-        metrics["quality_rate"] = round(
-            (metrics["final_count"] / initial_count) * 100, 2
-        )
+        metrics["quality_rate"] = round((metrics["final_count"] / initial_count) * 100, 2)
 
-    logger.info(f"✅ Nettoyage terminé — {metrics['final_count']}/{initial_count} lignes "
-                f"({metrics['quality_rate']}% qualité)")
+    logger.info(
+        f"✅ Nettoyage terminé — {metrics['final_count']}/{initial_count} lignes "
+        f"({metrics['quality_rate']}% qualité)"
+    )
 
     return df_clean, metrics

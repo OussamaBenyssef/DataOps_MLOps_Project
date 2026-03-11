@@ -36,6 +36,7 @@ MAX_RUNS = 50
 
 # ─────────────────────── TASK FUNCTIONS ──────────────────────────────────
 
+
 def collect_ml_metrics(**context):
     """
     Collecte les métriques MLflow (runs + registry) et les persiste dans MongoDB.
@@ -99,11 +100,14 @@ def collect_ml_metrics(**context):
                 logger.warning("Experiment not found: %s", exp_name)
                 continue
             exp_id = exp["experiment_id"]
-            res = mlflow_post("runs/search", {
-                "experiment_ids": [exp_id],
-                "max_results": MAX_RUNS,
-                "order_by": ["metrics.f1 DESC"],
-            })
+            res = mlflow_post(
+                "runs/search",
+                {
+                    "experiment_ids": [exp_id],
+                    "max_results": MAX_RUNS,
+                    "order_by": ["metrics.f1 DESC"],
+                },
+            )
             for run in res.get("runs", []):
                 info = run.get("info", {})
                 # MLflow REST API returns metrics/params as list of {key, value} objects
@@ -113,24 +117,25 @@ def collect_ml_metrics(**context):
                 params = {p["key"]: p["value"] for p in (params_raw if isinstance(params_raw, list) else [])}
                 tags = {t["key"]: t["value"] for t in run.get("data", {}).get("tags", [])}
                 start_ms = info.get("start_time", 0)
-                all_runs.append({
-                    "run_id": info.get("run_id"),
-                    "run_name": info.get("run_name", ""),
-                    "experiment_name": exp_name,
-                    "model_type": tags.get("model_type", "unknown"),
-                    "symbol": tags.get("symbol", ""),
-                    "task": tags.get("task", ""),
-                    "start_time": (
-                        datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc).isoformat()
-                        if start_ms else None
-                    ),
-                    "accuracy": float(metrics.get("accuracy", 0) or 0),
-                    "precision": float(metrics.get("precision", 0) or 0),
-                    "recall": float(metrics.get("recall", 0) or 0),
-                    "f1": float(metrics.get("f1", 0) or 0),
-                    "n_features": int(params.get("n_features", 0) or 0),
-                    "n_train_samples": int(params.get("n_train_samples", 0) or 0),
-                })
+                all_runs.append(
+                    {
+                        "run_id": info.get("run_id"),
+                        "run_name": info.get("run_name", ""),
+                        "experiment_name": exp_name,
+                        "model_type": tags.get("model_type", "unknown"),
+                        "symbol": tags.get("symbol", ""),
+                        "task": tags.get("task", ""),
+                        "start_time": (
+                            datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc).isoformat() if start_ms else None
+                        ),
+                        "accuracy": float(metrics.get("accuracy", 0) or 0),
+                        "precision": float(metrics.get("precision", 0) or 0),
+                        "recall": float(metrics.get("recall", 0) or 0),
+                        "f1": float(metrics.get("f1", 0) or 0),
+                        "n_features": int(params.get("n_features", 0) or 0),
+                        "n_train_samples": int(params.get("n_train_samples", 0) or 0),
+                    }
+                )
             logger.info("  %s: %d runs", exp_name, len([r for r in all_runs if r["experiment_name"] == exp_name]))
 
         # ── Registered models ─────────────────────────────────────────────
@@ -138,13 +143,15 @@ def collect_ml_metrics(**context):
         data = mlflow_get("registered-models/search", {"max_results": 50})
         for m in data.get("registered_models", []):
             for v in m.get("latest_versions", []):
-                registered_models.append({
-                    "model_name": m.get("name", ""),
-                    "version": v.get("version", ""),
-                    "stage": v.get("current_stage", ""),
-                    "status": v.get("status", ""),
-                    "run_id": v.get("run_id", ""),
-                })
+                registered_models.append(
+                    {
+                        "model_name": m.get("name", ""),
+                        "version": v.get("version", ""),
+                        "stage": v.get("current_stage", ""),
+                        "status": v.get("status", ""),
+                        "run_id": v.get("run_id", ""),
+                    }
+                )
 
     # ── Health score ─────────────────────────────────────────────────────
 
@@ -186,7 +193,9 @@ def collect_ml_metrics(**context):
     logger.info("Inserted: %s", result.inserted_id)
     logger.info(
         "Runs: %d | Models: %d | Health: %d/100",
-        len(all_runs), len(registered_models), health_score,
+        len(all_runs),
+        len(registered_models),
+        health_score,
     )
 
     # Push stats to XCom for summary task
@@ -201,6 +210,7 @@ def collect_ml_metrics(**context):
 def log_ml_metrics_summary(**context):
     """Résumé final de la collecte ML metrics."""
     import logging
+
     logger = logging.getLogger(__name__)
 
     ti = context["ti"]
@@ -229,7 +239,7 @@ with DAG(
     dag_id="crypto_ml_metrics",
     default_args=default_args,
     description="Collecte métriques ML (MLflow → MongoDB) pour Metabase dashboard P5",
-    schedule_interval="5 1 * * *",   # 01h05 UTC — après crypto_ml_training (01h00)
+    schedule_interval="5 1 * * *",  # 01h05 UTC — après crypto_ml_training (01h00)
     catchup=False,
     max_active_runs=1,
     tags=["crypto", "ml", "metrics", "P5", "metabase", "mlflow"],

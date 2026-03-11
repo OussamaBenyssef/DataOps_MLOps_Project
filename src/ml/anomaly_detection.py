@@ -40,6 +40,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 def _import_tensorflow():
     """Lazy import TensorFlow to avoid slow startup when not needed."""
     import tensorflow as tf
+
     return tf
 
 
@@ -81,10 +82,7 @@ class CryptoAnomalyDetector:
     # ------------------------------------------------------------------
 
     def prepare_data(
-        self,
-        df: pd.DataFrame,
-        feature_names: List[str],
-        target_col: str = "anomaly_label"
+        self, df: pd.DataFrame, feature_names: List[str], target_col: str = "anomaly_label"
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Splits and scales data for anomaly detection.
@@ -99,14 +97,18 @@ class CryptoAnomalyDetector:
         """
         logger.info("Preparing data for anomaly detection...")
 
-        X = df[feature_names].values
+        # Select feature columns and encode any string/categorical columns
+        X_df = df[feature_names].copy()
+        for col in X_df.columns:
+            if X_df[col].dtype == object:
+                logger.info(f"  Encoding categorical column: {col} " f"(unique: {X_df[col].nunique()})")
+                X_df[col] = pd.Categorical(X_df[col]).codes  # str → int (0, 1, 2…)
+
+        X = X_df.values.astype(np.float64)
         y = df[target_col].values if target_col in df.columns else np.zeros(len(df))
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=self.test_size,
-            random_state=self.random_state,
-            shuffle=False  # time-series: preserve order
+            X, y, test_size=self.test_size, random_state=self.random_state, shuffle=False  # time-series: preserve order
         )
 
         # Scale features
@@ -125,11 +127,7 @@ class CryptoAnomalyDetector:
     # ------------------------------------------------------------------
 
     def train_isolation_forest(
-        self,
-        X_train: np.ndarray,
-        X_test: np.ndarray,
-        y_test: np.ndarray,
-        params: Optional[Dict] = None
+        self, X_train: np.ndarray, X_test: np.ndarray, y_test: np.ndarray, params: Optional[Dict] = None
     ) -> Tuple[IsolationForest, Dict[str, float]]:
         """
         Trains an Isolation Forest for unsupervised anomaly detection.
@@ -216,15 +214,17 @@ class CryptoAnomalyDetector:
         n_features = X_train.shape[1]
 
         # Build autoencoder
-        model = tf.keras.Sequential([
-            # Encoder
-            tf.keras.layers.Input(shape=(n_features,)),
-            tf.keras.layers.Dense(32, activation="relu"),
-            tf.keras.layers.Dense(latent_dim, activation="relu"),
-            # Decoder
-            tf.keras.layers.Dense(32, activation="relu"),
-            tf.keras.layers.Dense(n_features, activation="sigmoid"),
-        ])
+        model = tf.keras.Sequential(
+            [
+                # Encoder
+                tf.keras.layers.Input(shape=(n_features,)),
+                tf.keras.layers.Dense(32, activation="relu"),
+                tf.keras.layers.Dense(latent_dim, activation="relu"),
+                # Decoder
+                tf.keras.layers.Dense(32, activation="relu"),
+                tf.keras.layers.Dense(n_features, activation="sigmoid"),
+            ]
+        )
 
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
@@ -233,7 +233,8 @@ class CryptoAnomalyDetector:
 
         # Train (reconstruct the input)
         model.fit(
-            X_train, X_train,
+            X_train,
+            X_train,
             epochs=epochs,
             batch_size=batch_size,
             validation_data=(X_test, X_test),
@@ -243,9 +244,7 @@ class CryptoAnomalyDetector:
         # Compute reconstruction errors on training set to determine threshold
         train_recon = model.predict(X_train, verbose=0)
         train_errors = np.mean(np.square(X_train - train_recon), axis=1)
-        threshold = float(np.percentile(
-            train_errors, anomaly_config.reconstruction_threshold_percentile
-        ))
+        threshold = float(np.percentile(train_errors, anomaly_config.reconstruction_threshold_percentile))
 
         # Evaluate on test set
         test_recon = model.predict(X_test, verbose=0)
@@ -353,9 +352,7 @@ class CryptoAnomalyDetector:
                 mlflow.log_params(params)
 
                 # Filter out non-numeric metrics for MLflow
-                numeric_metrics = {
-                    k: v for k, v in metrics.items() if isinstance(v, (int, float))
-                }
+                numeric_metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
                 mlflow.log_metrics(numeric_metrics)
 
                 if model_type == "isolation_forest":
@@ -363,7 +360,9 @@ class CryptoAnomalyDetector:
                         mlflow.sklearn.log_model(model, "model")
                     except Exception as model_err:
                         logger.warning(f"Native log_model failed ({model_err}), using joblib fallback")
-                        import tempfile, joblib as _joblib
+                        import tempfile
+                        import joblib as _joblib
+
                         with tempfile.TemporaryDirectory() as tmpdir:
                             path = f"{tmpdir}/{model_type}_model.joblib"
                             _joblib.dump(model, path)
@@ -373,17 +372,16 @@ class CryptoAnomalyDetector:
                         mlflow.keras.log_model(model, "model")
                     except Exception as model_err:
                         logger.warning(f"Native log_model failed ({model_err}), using joblib fallback")
-                        import tempfile, joblib as _joblib
+                        import tempfile
+                        import joblib as _joblib
+
                         with tempfile.TemporaryDirectory() as tmpdir:
                             path = f"{tmpdir}/{model_type}_model.joblib"
                             _joblib.dump(model, path)
                             mlflow.log_artifact(path, "model")
 
                 if feature_names:
-                    mlflow.log_text(
-                        json.dumps(feature_names, indent=2),
-                        "feature_names.json"
-                    )
+                    mlflow.log_text(json.dumps(feature_names, indent=2), "feature_names.json")
 
                 run_id = mlflow.active_run().info.run_id
                 logger.info(f"  Logged to MLflow (run_id: {run_id})")
@@ -578,26 +576,18 @@ class CryptoAnomalyDetector:
         logger.info("=" * 60)
 
         # Prepare data
-        X_train, X_test, y_train, y_test = self.prepare_data(
-            df, feature_names, target_col
-        )
+        X_train, X_test, y_train, y_test = self.prepare_data(df, feature_names, target_col)
 
         # Train Isolation Forest
-        if_model, if_metrics = self.train_isolation_forest(
-            X_train, X_test, y_test, if_params
-        )
+        if_model, if_metrics = self.train_isolation_forest(X_train, X_test, y_test, if_params)
 
         # Train Autoencoder
         ae_model, ae_threshold, ae_metrics = self.train_autoencoder(
-            X_train, X_test, y_test,
-            epochs=ae_epochs, batch_size=ae_batch_size
+            X_train, X_test, y_test, epochs=ae_epochs, batch_size=ae_batch_size
         )
 
         # Compare by F1 score
-        best_name = (
-            "isolation_forest" if if_metrics["f1"] >= ae_metrics["f1"]
-            else "autoencoder"
-        )
+        best_name = "isolation_forest" if if_metrics["f1"] >= ae_metrics["f1"] else "autoencoder"
 
         logger.info("")
         logger.info("=" * 60)
@@ -615,10 +605,7 @@ class CryptoAnomalyDetector:
                 "n_estimators": anomaly_config.n_estimators,
                 "model_type": "isolation_forest",
             }
-            self.log_to_mlflow(
-                if_model, "isolation_forest", if_log_params,
-                if_metrics, feature_names
-            )
+            self.log_to_mlflow(if_model, "isolation_forest", if_log_params, if_metrics, feature_names)
 
             ae_log_params = {
                 "epochs": ae_epochs or anomaly_config.autoencoder_epochs,
@@ -627,10 +614,7 @@ class CryptoAnomalyDetector:
                 "threshold": ae_threshold,
                 "model_type": "autoencoder",
             }
-            self.log_to_mlflow(
-                ae_model, "autoencoder", ae_log_params,
-                ae_metrics, feature_names
-            )
+            self.log_to_mlflow(ae_model, "autoencoder", ae_log_params, ae_metrics, feature_names)
 
         return {
             "best_model_name": best_name,

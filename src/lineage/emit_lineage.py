@@ -28,15 +28,15 @@ try:
     from datahub.metadata.schema_classes import (
         UpstreamClass,
         UpstreamLineageClass,
-        DatasetLineageTypeClass,
         DatasetPropertiesClass,
     )
+
     DATAHUB_AVAILABLE = True
 except ImportError:
     DATAHUB_AVAILABLE = False
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from src.lineage.config import lineage_config, LineageConfig
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from src.lineage.config import lineage_config, LineageConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -64,29 +64,21 @@ class DataLineageEmitter:
 
     def make_kafka_urn(self, topic: str) -> str:
         """Build a DataHub URN for a Kafka topic."""
-        return builder.make_dataset_urn(
-            self.config.platforms.kafka, topic, self.config.datahub.environment
-        )
+        return builder.make_dataset_urn(self.config.platforms.kafka, topic, self.config.datahub.environment)
 
     def make_spark_urn(self, job_key: str) -> str:
         """Build a DataHub URN for a Spark job (logical dataset)."""
         name = self.config.spark_jobs[job_key]
-        return builder.make_dataset_urn(
-            self.config.platforms.spark, name, self.config.datahub.environment
-        )
+        return builder.make_dataset_urn(self.config.platforms.spark, name, self.config.datahub.environment)
 
     def make_mongodb_urn(self, collection: str) -> str:
         """Build a DataHub URN for a MongoDB collection."""
-        return builder.make_dataset_urn(
-            self.config.platforms.mongodb, collection, self.config.datahub.environment
-        )
+        return builder.make_dataset_urn(self.config.platforms.mongodb, collection, self.config.datahub.environment)
 
     def make_ml_urn(self, dataset_key: str) -> str:
         """Build a DataHub URN for an ML dataset."""
         name = self.config.ml_datasets[dataset_key]
-        return builder.make_dataset_urn(
-            self.config.platforms.ml, name, self.config.datahub.environment
-        )
+        return builder.make_dataset_urn(self.config.platforms.ml, name, self.config.datahub.environment)
 
     # ── Core Emission ─────────────────────────────────────────────
 
@@ -159,16 +151,20 @@ class DataLineageEmitter:
         events = []
 
         # raw_trades → Spark trades_cleaning
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_spark_urn("trades_cleaning"),
-            upstream_urns=[self.make_kafka_urn("raw_trades")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_spark_urn("trades_cleaning"),
+                upstream_urns=[self.make_kafka_urn("raw_trades")],
+            )
+        )
 
         # raw_klines → Spark ohlcv_processing
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_spark_urn("ohlcv_processing"),
-            upstream_urns=[self.make_kafka_urn("raw_klines")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_spark_urn("ohlcv_processing"),
+                upstream_urns=[self.make_kafka_urn("raw_klines")],
+            )
+        )
 
         return events
 
@@ -183,22 +179,28 @@ class DataLineageEmitter:
         events = []
 
         # Spark trades_cleaning → MongoDB raw_trades
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_mongodb_urn("cryptomarket.raw_trades"),
-            upstream_urns=[self.make_spark_urn("trades_cleaning")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_mongodb_urn("cryptomarket.raw_trades"),
+                upstream_urns=[self.make_spark_urn("trades_cleaning")],
+            )
+        )
 
         # Spark ohlcv_processing → MongoDB ohlcv
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_mongodb_urn("cryptomarket.ohlcv"),
-            upstream_urns=[self.make_spark_urn("ohlcv_processing")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_mongodb_urn("cryptomarket.ohlcv"),
+                upstream_urns=[self.make_spark_urn("ohlcv_processing")],
+            )
+        )
 
         # Spark indicators_calc → MongoDB indicators
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_mongodb_urn("cryptomarket.indicators"),
-            upstream_urns=[self.make_spark_urn("indicators_calc")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_mongodb_urn("cryptomarket.indicators"),
+                upstream_urns=[self.make_spark_urn("indicators_calc")],
+            )
+        )
 
         return events
 
@@ -212,25 +214,31 @@ class DataLineageEmitter:
         events = []
 
         # MongoDB ohlcv + indicators → ML feature_engineering
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_ml_urn("feature_engineering"),
-            upstream_urns=[
-                self.make_mongodb_urn("cryptomarket.ohlcv"),
-                self.make_mongodb_urn("cryptomarket.indicators"),
-            ],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_ml_urn("feature_engineering"),
+                upstream_urns=[
+                    self.make_mongodb_urn("cryptomarket.ohlcv"),
+                    self.make_mongodb_urn("cryptomarket.indicators"),
+                ],
+            )
+        )
 
         # ML feature_engineering → xgboost_predictor
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_ml_urn("xgboost_predictor"),
-            upstream_urns=[self.make_ml_urn("feature_engineering")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_ml_urn("xgboost_predictor"),
+                upstream_urns=[self.make_ml_urn("feature_engineering")],
+            )
+        )
 
         # ML feature_engineering → anomaly_detector
-        events.append(self._emit_upstream_lineage(
-            downstream_urn=self.make_ml_urn("anomaly_detector"),
-            upstream_urns=[self.make_ml_urn("feature_engineering")],
-        ))
+        events.append(
+            self._emit_upstream_lineage(
+                downstream_urn=self.make_ml_urn("anomaly_detector"),
+                upstream_urns=[self.make_ml_urn("feature_engineering")],
+            )
+        )
 
         return events
 
@@ -242,49 +250,49 @@ class DataLineageEmitter:
 
         descriptions = {
             # Kafka
-            self.make_kafka_urn("raw_trades"):
-                "Real-time trade events from Binance WebSocket (BTCUSDT, ETHUSDT, BNBUSDT)",
-            self.make_kafka_urn("raw_klines"):
-                "1-minute kline/candlestick data from Binance WebSocket",
-            self.make_kafka_urn("processed_data"):
-                "Processed and enriched OHLCV data after Spark ETL",
-            self.make_kafka_urn("anomalies"):
-                "Detected market anomalies (flash crashes, volume spikes)",
+            self.make_kafka_urn(
+                "raw_trades"
+            ): "Real-time trade events from Binance WebSocket (BTCUSDT, ETHUSDT, BNBUSDT)",
+            self.make_kafka_urn("raw_klines"): "1-minute kline/candlestick data from Binance WebSocket",
+            self.make_kafka_urn("processed_data"): "Processed and enriched OHLCV data after Spark ETL",
+            self.make_kafka_urn("anomalies"): "Detected market anomalies (flash crashes, volume spikes)",
             # Spark
-            self.make_spark_urn("trades_cleaning"):
-                "Spark ETL: validates, cleans, and enriches raw trade events",
-            self.make_spark_urn("ohlcv_processing"):
-                "Spark ETL: aggregates trades to OHLCV candles, calculates price changes",
-            self.make_spark_urn("indicators_calc"):
-                "Spark ETL: calculates RSI, MACD, Bollinger, SMA, EMA indicators",
-            self.make_spark_urn("metrics_aggregation"):
-                "Spark ETL: aggregates daily/hourly market metrics",
+            self.make_spark_urn("trades_cleaning"): "Spark ETL: validates, cleans, and enriches raw trade events",
+            self.make_spark_urn(
+                "ohlcv_processing"
+            ): "Spark ETL: aggregates trades to OHLCV candles, calculates price changes",
+            self.make_spark_urn("indicators_calc"): "Spark ETL: calculates RSI, MACD, Bollinger, SMA, EMA indicators",
+            self.make_spark_urn("metrics_aggregation"): "Spark ETL: aggregates daily/hourly market metrics",
             # MongoDB
-            self.make_mongodb_urn("cryptomarket.raw_trades"):
-                "Raw trade events stored after cleaning (symbol, price, qty, timestamp)",
-            self.make_mongodb_urn("cryptomarket.ohlcv"):
-                "OHLCV candles with price change and volume metrics",
-            self.make_mongodb_urn("cryptomarket.indicators"):
-                "Technical indicators: RSI, MACD, Bollinger Bands, SMA, EMA",
-            self.make_mongodb_urn("cryptomarket.anomalies"):
-                "Detected anomalies with scores and labels",
-            self.make_mongodb_urn("cryptomarket.predictions"):
-                "ML model predictions: direction, confidence, model type",
+            self.make_mongodb_urn(
+                "cryptomarket.raw_trades"
+            ): "Raw trade events stored after cleaning (symbol, price, qty, timestamp)",
+            self.make_mongodb_urn("cryptomarket.ohlcv"): "OHLCV candles with price change and volume metrics",
+            self.make_mongodb_urn(
+                "cryptomarket.indicators"
+            ): "Technical indicators: RSI, MACD, Bollinger Bands, SMA, EMA",
+            self.make_mongodb_urn("cryptomarket.anomalies"): "Detected anomalies with scores and labels",
+            self.make_mongodb_urn(
+                "cryptomarket.predictions"
+            ): "ML model predictions: direction, confidence, model type",
             # ML
-            self.make_ml_urn("feature_engineering"):
-                "Feature matrix: price returns, volatility, volume ratios, lag/rolling features",
-            self.make_ml_urn("xgboost_predictor"):
-                "XGBoost classifier for short-term price direction prediction (UP/DOWN)",
-            self.make_ml_urn("anomaly_detector"):
-                "Isolation Forest for unsupervised market anomaly detection",
+            self.make_ml_urn(
+                "feature_engineering"
+            ): "Feature matrix: price returns, volatility, volume ratios, lag/rolling features",
+            self.make_ml_urn(
+                "xgboost_predictor"
+            ): "XGBoost classifier for short-term price direction prediction (UP/DOWN)",
+            self.make_ml_urn("anomaly_detector"): "Isolation Forest for unsupervised market anomaly detection",
         }
 
         for urn, desc in descriptions.items():
-            events.append(self._emit_dataset_properties(
-                urn=urn,
-                description=desc,
-                custom_properties={"pipeline": "crypto-mlops", "updated_at": ts},
-            ))
+            events.append(
+                self._emit_dataset_properties(
+                    urn=urn,
+                    description=desc,
+                    custom_properties={"pipeline": "crypto-mlops", "updated_at": ts},
+                )
+            )
 
         return events
 
@@ -301,10 +309,7 @@ class DataLineageEmitter:
             Number of events emitted
         """
         if not DATAHUB_AVAILABLE:
-            raise ImportError(
-                "acryl-datahub is not installed. "
-                "Install it with: pip install acryl-datahub"
-            )
+            raise ImportError("acryl-datahub is not installed. " "Install it with: pip install acryl-datahub")
 
         self._events_emitted = 0
 
@@ -334,6 +339,7 @@ class DataLineageEmitter:
 
 # ── CLI Entry Point ────────────────────────────────────────────
 
+
 def main():
     """CLI entry point for lineage emission."""
     logging.basicConfig(
@@ -342,6 +348,7 @@ def main():
     )
 
     import argparse
+
     parser = argparse.ArgumentParser(description="Emit data lineage to DataHub")
     parser.add_argument(
         "--dry-run",

@@ -6,26 +6,29 @@ groupBy/window aggregations and writes results to MongoDB.
 
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
-    col, avg, min as spark_min, max as spark_max,
-    sum as spark_sum, count, stddev, first, last,
-    when, lit, current_timestamp,
-    round as spark_round, window
+    col,
+    avg,
+    min as spark_min,
+    max as spark_max,
+    sum as spark_sum,
+    count,
+    stddev,
+    first,
+    last,
+    when,
+    lit,
+    current_timestamp,
+    round as spark_round,
+    window,
 )
 import logging
 
-try:
-    from .config import processing_config
-except ImportError:
-    from config import processing_config
 
 logger = logging.getLogger(__name__)
 
 
 def calculate_aggregated_metrics(
-    df: DataFrame,
-    window_duration: str = "1 day",
-    slide_duration: str = None,
-    partition_cols: list = None
+    df: DataFrame, window_duration: str = "1 day", slide_duration: str = None, partition_cols: list = None
 ) -> DataFrame:
     """
     Calculates aggregated metrics over a time window from OHLCV data.
@@ -63,16 +66,13 @@ def calculate_aggregated_metrics(
     group_cols = partition_cols + [time_window]
 
     # Compute volume * close for VWAP calculation
-    df_with_vwap_component = df.withColumn(
-        "_volume_price", col("volume") * col("close")
-    )
+    df_with_vwap_component = df.withColumn("_volume_price", col("volume") * col("close"))
 
     # Build aggregations
     agg_exprs = [
         # Period boundaries
         spark_min(col("timestamp")).alias("period_start"),
         spark_max(col("timestamp")).alias("period_end"),
-
         # Price metrics
         spark_round(avg(col("close")), 8).alias("avg_price"),
         spark_round(spark_min(col("low")), 8).alias("min_price"),
@@ -80,54 +80,44 @@ def calculate_aggregated_metrics(
         spark_round(first(col("close")), 8).alias("open_price"),
         spark_round(last(col("close")), 8).alias("close_price"),
         spark_round(stddev(col("close")), 8).alias("price_volatility"),
-
         # Volume metrics
         spark_round(spark_sum(col("volume")), 8).alias("total_volume"),
         spark_round(avg(col("volume")), 8).alias("avg_volume"),
-
         # VWAP: sum(volume * close) / sum(volume)
-        spark_round(
-            spark_sum(col("_volume_price")) / spark_sum(col("volume")),
-            8
-        ).alias("vwap"),
-
+        spark_round(spark_sum(col("_volume_price")) / spark_sum(col("volume")), 8).alias("vwap"),
         # Count
         count("*").cast("int").alias("num_candles"),
     ]
 
     # Add trades aggregation if column exists
     if trades_col:
-        agg_exprs.append(
-            spark_sum(col(trades_col)).cast("int").alias("total_trades")
-        )
+        agg_exprs.append(spark_sum(col(trades_col)).cast("int").alias("total_trades"))
 
     # Execute aggregation
-    result_df = (df_with_vwap_component
-        .groupBy(*group_cols)
-        .agg(*agg_exprs)
-    )
+    result_df = df_with_vwap_component.groupBy(*group_cols).agg(*agg_exprs)
 
     # Add derived metrics
-    result_df = (result_df
+    result_df = (
+        result_df
         # Price range percentage: (max - min) / min * 100
         .withColumn(
             "price_range_pct",
             spark_round(
-                when(col("min_price") > 0,
-                     ((col("max_price") - col("min_price")) / col("min_price")) * 100
-                ).otherwise(lit(0.0)),
-                4
-            )
+                when(col("min_price") > 0, ((col("max_price") - col("min_price")) / col("min_price")) * 100).otherwise(
+                    lit(0.0)
+                ),
+                4,
+            ),
         )
         # Period return percentage: (close - open) / open * 100
         .withColumn(
             "period_return_pct",
             spark_round(
-                when(col("open_price") > 0,
-                     ((col("close_price") - col("open_price")) / col("open_price")) * 100
+                when(
+                    col("open_price") > 0, ((col("close_price") - col("open_price")) / col("open_price")) * 100
                 ).otherwise(lit(0.0)),
-                4
-            )
+                4,
+            ),
         )
         # Add interval label
         .withColumn("interval", lit(interval_label))
@@ -141,9 +131,7 @@ def calculate_aggregated_metrics(
 
     # Handle null volatility (when only 1 candle in window)
     result_df = result_df.withColumn(
-        "price_volatility",
-        when(col("price_volatility").isNull(), lit(0.0))
-        .otherwise(col("price_volatility"))
+        "price_volatility", when(col("price_volatility").isNull(), lit(0.0)).otherwise(col("price_volatility"))
     )
 
     # Drop the window struct column and select final columns
@@ -184,11 +172,7 @@ def calculate_daily_metrics(df: DataFrame, partition_cols: list = None) -> DataF
         DataFrame with daily aggregated metrics
     """
     logger.info("Calculating daily aggregated metrics...")
-    return calculate_aggregated_metrics(
-        df,
-        window_duration="1 day",
-        partition_cols=partition_cols
-    )
+    return calculate_aggregated_metrics(df, window_duration="1 day", partition_cols=partition_cols)
 
 
 def calculate_hourly_metrics(df: DataFrame, partition_cols: list = None) -> DataFrame:
@@ -203,11 +187,7 @@ def calculate_hourly_metrics(df: DataFrame, partition_cols: list = None) -> Data
         DataFrame with hourly aggregated metrics
     """
     logger.info("Calculating hourly aggregated metrics...")
-    return calculate_aggregated_metrics(
-        df,
-        window_duration="1 hour",
-        partition_cols=partition_cols
-    )
+    return calculate_aggregated_metrics(df, window_duration="1 hour", partition_cols=partition_cols)
 
 
 def _window_to_interval_label(window_duration: str) -> str:
