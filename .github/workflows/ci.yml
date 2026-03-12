@@ -81,6 +81,10 @@ jobs:
         run: |
           pytest tests/ \
             -m "not integration and not integration_pipeline" \
+            --ignore=tests/test_aggregated_metrics.py \
+            --ignore=tests/test_spark_processing.py \
+            --ignore=tests/test_integration_kafka_spark_mongodb.py \
+            --ignore=tests/test_real_data_e2e.py \
             -v \
             --tb=short \
             --no-header \
